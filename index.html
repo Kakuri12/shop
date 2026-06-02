@@ -849,7 +849,6 @@ const CONFIG = {
   EDGE_FN_URL    : "https://qfuxpjdkchkymoutqcmy.supabase.co/functions/v1/quick-worker",   // ← URL ของ Supabase Edge Function (roblox-notify) หลัง deploy
   COIN_RATE      : 1,   // 1 บาท = 1 เครดิต
 };
-
 /* Supabase client */
 let sb = null;
 try { sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON); } catch(e) {}
@@ -993,7 +992,7 @@ const App={
         btn.innerHTML=this.spin(18)+' กำลังดึง Avatar...';
         const avatarUrl=await this._getRobloxAvatar(data.roblox_uid).catch(()=>null);
         // clear code หลัง login สำเร็จ (ใช้ได้ครั้งเดียว)
-        await sb.from('players').update({login_code:null,login_code_exp:0}).eq('roblox_id',data.roblox_id).catch(()=>{});
+        try{ await sb.from('players').update({login_code:null,login_code_exp:0}).eq('roblox_id',data.roblox_id); }catch(_){}
         SFX.ok();
         Session.save({user:{username:name,roblox_id:data.roblox_id,avatarUrl},coins:data.coins??0,txHistory:[],usedCodes:[]});
         location.reload();
