@@ -842,11 +842,11 @@ const ITEM_COLOR = '#8b5cf6';
    CONFIG — แก้ตรงนี้ก่อนใช้งาน
 ══════════════════════════════════════ */
 const CONFIG = {
-  SUPABASE_URL   : "https://XXXX.supabase.co",       // ← ใส่ Project URL
-  SUPABASE_ANON  : "eyJhbGci...",                     // ← ใส่ anon public key
-  ROBLOX_WEBHOOK : "https://apis.roblox.com/messaging-service/v1/universes/YOUR_UNIVERSE_ID/topics/WexZItemDelivery",
-  ROBLOX_API_KEY : "YOUR_OPEN_CLOUD_API_KEY",         // ← ใส่ Roblox API Key
-  EDGE_FN_URL    : "",   // ← URL ของ Supabase Edge Function (roblox-notify) หลัง deploy
+  SUPABASE_URL   : "https://qfuxpjdkchkymoutqcmy.supabase.co",       // ← ใส่ Project URL
+  SUPABASE_ANON  : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmdXhwamRrY2hreW1vdXRxY215Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwNzk1NjEsImV4cCI6MjA5NTY1NTU2MX0.VSFslV0upx0mrZB-45nCXUfRCRHEQiX96-g1qXZx6-k",                     // ← ใส่ anon public key
+  ROBLOX_WEBHOOK : "https://apis.roblox.com/messaging-service/v1/universes/82968564435326/topics/WexZItemDelivery",
+  ROBLOX_API_KEY : "3JY5myYfzUW1UGSRhnPfCTgsJ2ipc4WeOW2PPj3KJ1MmNg8nZXlKaGJHY2lPaUpTVXpJMU5pSXNJbXRwWkNJNkluTnBaeTB5TURJeExUQTNMVEV6VkRFNE9qVXhPalE1V2lJc0luUjVjQ0k2SWtwWFZDSjkuZXlKaGRXUWlPaUpTYjJKc2IzaEpiblJsY201aGJDSXNJbWx6Y3lJNklrTnNiM1ZrUVhWMGFHVnVkR2xqWVhScGIyNVRaWEoyYVdObElpd2lZbUZ6WlVGd2FVdGxlU0k2SWpOS1dUVnRlVmxtZWxWWE1WVkhVMUpvYmxCbVExUm5jMG95YVhCak5GZGxUMWN5VUZCcU0wdEtNVTF0VG1jNGJpSXNJbTkzYm1WeVNXUWlPaUk0T0RBMU5qSXhOakU1SWl3aVpYaHdJam94Tnpnd05ERXpNemt5TENKcFlYUWlPakUzT0RBME1EazNPVElzSW01aVppSTZNVGM0TURRd09UYzVNbjAuRmxRVFBMQkxEd2ZQelY1UC0xMldNSldxOFBfRFFPR2VQYkhHQmVGZ2VoS08xbTYtN01GemhlRDRFNDg2WVZwSVlPT251Q0I3bmJvdm1ZRjh4Ty01NVBfVEpPRk5tLUJBY3FMMVNGbGFkRGtLa19UYzFvQ2M5cEpGeEVqTDk5M2x1N2cxXzNtVU40bEN0ZUs0dlF4dWNvSHhrbVZFQV9Vb0JxcVB0V0ZvbGdSb0dPcUdDVEVDQ2MtZDUtcS1zM1R3UGNjZ05Lb0h2MjZ3ZW1ONWlucXJvS3VBakpJeDdnaUZIbkhxR290ZDgzQ05LWnlxZ0s4YWNBcUp2SnpmU3ZUcUJwcnRlZDFVZGZPb0tfWXZCX1FpOFIxcEl0VDFvOTFzeThiZEpHcWt3VWNuQWdCWDRnQlVYS0plT2ZGTVFqUmR3OEp3N2RBVlppTEU5dHl2LWJpSFRB",         // ← ใส่ Roblox API Key
+  EDGE_FN_URL    : "https://qfuxpjdkchkymoutqcmy.supabase.co/functions/v1/quick-worker",   // ← URL ของ Supabase Edge Function (roblox-notify) หลัง deploy
   COIN_RATE      : 1,   // 1 บาท = 1 เครดิต
 };
 
@@ -970,39 +970,47 @@ const App={
     SFX.init();
     if(name.length<3){SFX.err();err.style.display='block';err.textContent='โปรดระบุชื่ออย่างน้อย 3 ตัวอักษร';return;}
     if(code.length<6){SFX.err();err.style.display='block';err.textContent='กรุณาใส่ Security Code 6 หลัก';return;}
-    err.style.display='none';SFX.click();btn.disabled=true;btn.innerHTML=this.spin(18)+' กำลังตรวจสอบสิทธิ์เชื่อมต่อ...';
+    err.style.display='none';SFX.click();btn.disabled=true;btn.innerHTML=this.spin(18)+' กำลังตรวจสอบสิทธิ์...';
     try {
-      btn.innerHTML=this.spin(18)+' กำลังดึงข้อมูลตัวละคร...';
-      // ดึง Roblox userId + avatar (public API ไม่มี CORS)
-      const robloxUserId = await this._getRobloxUserId(name);
-      const avatarUrl = robloxUserId ? await this._getRobloxAvatar(robloxUserId) : null;
-
-      let player;
+      // ── ถ้ามี Supabase: ตรวจ code จริงที่ game สร้างไว้ ──
       if(sb && CONFIG.SUPABASE_URL!=='https://XXXX.supabase.co') {
-        btn.innerHTML=this.spin(18)+' กำลังเชื่อมต่อฐานข้อมูล...';
-        const {data,error}=await sb.from('players').select('*').eq('username',name).single();
-        if(error&&error.code==='PGRST116'){
-          const newId='RBX_'+(robloxUserId||Date.now());
-          const {data:np,error:ne}=await sb.from('players')
-            .insert({roblox_id:newId,username:name,coins:500}).select().single();
-          if(ne)throw ne;
-          player=np;
-        }else if(error)throw error;
-        else player=data;
+        btn.innerHTML=this.spin(18)+' กำลังยืนยัน Security Code...';
+        const nowSec=Math.floor(Date.now()/1000);
+        const {data,error}=await sb.from('players')
+          .select('*')
+          .eq('username',name)
+          .eq('login_code',code)
+          .gt('login_code_exp',nowSec)
+          .single();
+        if(error||!data){
+          SFX.err();
+          btn.disabled=false;btn.innerHTML='ยืนยันการเชื่อมต่อ';
+          err.style.display='block';
+          err.textContent='Security Code ไม่ถูกต้องหรือหมดอายุแล้ว — พิมพ์ /getcode ในเกมใหม่';
+          return;
+        }
+        // ได้ roblox_id จริงจาก game แล้ว
+        btn.innerHTML=this.spin(18)+' กำลังดึง Avatar...';
+        const avatarUrl=await this._getRobloxAvatar(data.roblox_uid).catch(()=>null);
+        // clear code หลัง login สำเร็จ (ใช้ได้ครั้งเดียว)
+        await sb.from('players').update({login_code:null,login_code_exp:0}).eq('roblox_id',data.roblox_id).catch(()=>{});
+        SFX.ok();
+        Session.save({user:{username:name,roblox_id:data.roblox_id,avatarUrl},coins:data.coins??0,txHistory:[],usedCodes:[]});
+        location.reload();
+        return;
       }
+      // ── fallback: ไม่มี Supabase (dev mode) ──
       SFX.ok();
-      const coins=player?.coins??500;
-      const roblox_id=player?.roblox_id??('RBX_'+(robloxUserId||Date.now()));
-      Session.save({user:{username:name,roblox_id,avatarUrl},coins,txHistory:[],usedCodes:[]});
-      location.reload();
-    }catch(e){
-      // fallback ถ้า Supabase ยังไม่ตั้งค่า
-      SFX.ok();
-      // ยังคงลอง fetch avatar
       const robloxUserId=await this._getRobloxUserId(name).catch(()=>null);
       const avatarUrl=robloxUserId?await this._getRobloxAvatar(robloxUserId).catch(()=>null):null;
-      Session.save({user:{username:name,roblox_id:'RBX_'+Date.now(),avatarUrl},coins:500,txHistory:[],usedCodes:[]});
+      Session.save({user:{username:name,roblox_id:'RBX_'+Date.now(),avatarUrl},coins:0,txHistory:[],usedCodes:[]});
       location.reload();
+    } catch(e) {
+      SFX.err();
+      btn.disabled=false;
+      btn.innerHTML='ยืนยันการเชื่อมต่อ';
+      const err2=document.getElementById('lerr');
+      if(err2){err2.style.display='block';err2.textContent='เกิดข้อผิดพลาด: '+e.message;}
     }
   },
 
