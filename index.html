@@ -849,6 +849,7 @@ const CONFIG = {
   EDGE_FN_URL    : "https://qfuxpjdkchkymoutqcmy.supabase.co/functions/v1/quick-worker",   // ← URL ของ Supabase Edge Function (roblox-notify) หลัง deploy
   COIN_RATE      : 1,   // 1 บาท = 1 เครดิต
 };
+
 /* Supabase client */
 let sb = null;
 try { sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON); } catch(e) {}
@@ -1558,33 +1559,32 @@ const App={
     const st=this.st.pendingStates[pid];if(!st||st.status!=='idle')return;
     SFX.init();SFX.click();st.status='sending';
     const ab=document.getElementById('action-'+pid);
-    if(ab)ab.innerHTML=`<div style="text-align:center;font-size:13.5px;color:var(--t2);padding:10px 0"><span style="display:inline-block;margin-right:8px"><i class="fa-solid fa-circle-notch fa-spin" style="color:var(--accent)"></i></span> กำลังส่ง...</div>`;
+    if(ab)ab.innerHTML=`<div style="text-align:center;font-size:13.5px;color:var(--t2);padding:10px 0"><span style="display:inline-block;margin-right:8px"><i class="fa-solid fa-circle-notch fa-spin" style="color:var(--accent)"></i></span> กำลังส่งผ่าน Edge Function...</div>`;
     const pObj=this.st.pending.find(x=>x.pid==pid);
     // ── ส่ง Roblox Webhook ──
     let delivered = false;
-    if(pObj && CONFIG.ROBLOX_API_KEY !== 'YOUR_OPEN_CLOUD_API_KEY') {
+    if(pObj) {
       try {
-        const res = await fetch(CONFIG.ROBLOX_WEBHOOK,{
-          method:'POST',
-          headers:{'Content-Type':'application/json','x-api-key':CONFIG.ROBLOX_API_KEY},
-          body:JSON.stringify({
-            roblox_id : pObj.roblox_id || this.st.user?.roblox_id || '',
-            item_id   : pObj.item.id,
-            item_name : pObj.item.name,
-            source    : pObj.source,
-            order_id  : String(pid),
-            timestamp : Date.now(),
-          }),
+        // ใช้ Edge Function แทน (ไม่มีปัญหา CORS)
+        await this._callRobloxWebhook({
+          roblox_id : pObj.roblox_id || this.st.user?.roblox_id || '',
+          item_id   : pObj.item.id,
+          item_name : pObj.item.name,
+          source    : pObj.source,
+          order_id  : String(pid),
+          timestamp : Date.now(),
         });
-        delivered = res.ok;
+        delivered = true;
       } catch(e){ console.warn('[WexZ] Webhook:', e.message); }
     }
-    // ── อัปเดต Supabase ──
+    // ── อัปเดต Supabase (await + try/catch) ──
     if(sb && pObj) {
       const roblox_id = pObj.roblox_id || this.st.user?.roblox_id;
       if(roblox_id) {
-        sb.from('orders').update({status:'delivered'})
-          .eq('id', String(pid)).eq('roblox_id', roblox_id).catch(()=>{});
+        try {
+          await sb.from('orders').update({status:'delivered'})
+            .eq('id', String(pid)).eq('roblox_id', roblox_id);
+        } catch(e){ console.warn('[WexZ] Order update:', e.message); }
       }
     }
     await new Promise(r=>setTimeout(r,700));
