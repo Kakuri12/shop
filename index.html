@@ -1577,27 +1577,18 @@ const App={
         delivered = true;
       } catch(e){ console.warn('[WexZ] Webhook:', e.message); }
     }
-    // ── อัปเดต Supabase (await + try/catch) ──
-    if(sb && pObj) {
-      const roblox_id = pObj.roblox_id || this.st.user?.roblox_id;
-      if(roblox_id) {
-        try {
-          await sb.from('orders').update({status:'delivered'})
-            .eq('id', String(pid)).eq('roblox_id', roblox_id);
-        } catch(e){ console.warn('[WexZ] Order update:', e.message); }
-      }
-    }
+    // ── เว็บไม่ mark delivered — Lua script จะ mark เมื่อส่งของจริงแล้ว ──
     await new Promise(r=>setTimeout(r,700));
     SFX.ok();st.status='done';
     const row=document.getElementById('pending-'+pid);if(row)row.style.opacity='.4';
     if(pObj){
       const label = delivered
-        ? `ส่ง ${pObj.item.name} เข้าตัวละครแล้ว ✓`
-        : `บันทึก ${pObj.item.name} แล้ว (Roblox จะรับเมื่อ join)`;
+        ? `ส่งสัญญาณไปยัง Roblox แล้ว — รอรับของในเกม`
+        : `บันทึก ${pObj.item.name} แล้ว — Roblox จะส่งเมื่อ join เกม`;
       this.toast(label,'success');
     }
-    if(ab)ab.innerHTML=`<div style="text-align:center;font-size:13.5px;color:#10b981;font-family:var(--font-mono);padding:10px 0;background:rgba(16,185,129,.1);border-radius:12px;animation:popIn .3s ease;font-weight:700">โอนสิทธิ์เสร็จสิ้น ✓</div>`;
-    setTimeout(()=>{this.st.pending=this.st.pending.filter(x=>x.pid!=pid);this.renderHeader();if(this.st.page==='pending')this.renderPending();},1500);
+    if(ab)ab.innerHTML=`<div style="text-align:center;font-size:13.5px;color:#10b981;font-family:var(--font-mono);padding:10px 0;background:rgba(16,185,129,.1);border-radius:12px;animation:popIn .3s ease;font-weight:700">ส่งสัญญาณแล้ว — รอรับของในเกม 🎮</div>`;
+    setTimeout(()=>{this.st.pending=this.st.pending.filter(x=>x.pid!=pid);this.renderHeader();if(this.st.page==='pending')this.renderPending();},2500);
   },
   claimAll(){this.st.pending.filter(p=>!this.st.pendingStates[p.pid]||this.st.pendingStates[p.pid].status==='idle').forEach((p,i)=>setTimeout(()=>this.claimItem(p.pid),i*300));},
 
