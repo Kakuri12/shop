@@ -544,6 +544,7 @@ label.lbl{display:block;font-size:12px;color:var(--t2);margin-bottom:8px;font-fa
     <button class="admin-tab on" onclick="App.adminTab('cats')" id="atab-cats">หมวดหมู่สินค้า</button>
     <button class="admin-tab" onclick="App.adminTab('items')" id="atab-items">จัดการไอเทม</button>
     <button class="admin-tab" onclick="App.adminTab('gacha')" id="atab-gacha">ตั้งค่ากาชา</button>
+    <button class="admin-tab" onclick="App.adminTab('topups')" id="atab-topups">เติมเงิน</button>
     <button class="admin-tab" onclick="App.adminTab('site')" id="atab-site">ตั้งค่าเว็บไซต์</button>
     <button class="admin-tab" onclick="App.adminTab('monitor')" id="atab-monitor"><span id="monitor-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:6px;animation:pulseGlow 1.5s infinite"></span>Live Monitor</button>
   </div>
@@ -563,8 +564,8 @@ label.lbl{display:block;font-size:12px;color:var(--t2);margin-bottom:8px;font-fa
     </div>
     <!-- Step 1: กรอกจำนวน -->
     <div id="tp-s1">
-      <label class="lbl">จำนวนเงิน (บาท)</label>
-      <div style="position:relative;margin-bottom:6px">
+      <label class="lbl" id="tp-amt-label">จำนวนเงิน (บาท)</label>
+      <div id="tp-amt-wrap" style="position:relative;margin-bottom:6px">
         <input id="tp-amt" class="inp" type="number" min="10" max="10000" step="1" placeholder="ขั้นต่ำ 10 บาท"
           style="font-family:var(--font-mono);font-size:24px;font-weight:800;text-align:center;padding-right:60px;letter-spacing:1px"
           oninput="App._onAmtInput()">
@@ -572,7 +573,7 @@ label.lbl{display:block;font-size:12px;color:var(--t2);margin-bottom:8px;font-fa
       </div>
       <div id="tp-credit-preview" style="text-align:center;font-size:14px;color:var(--t2);margin-bottom:16px;min-height:20px"></div>
       <!-- Quick amounts -->
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">
+      <div id="tp-quick-amounts" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">
         <button class="btn-g" style="flex:1;min-width:64px;font-size:13px;padding:10px 0;border-radius:10px" onclick="App._setAmt(50)">50</button>
         <button class="btn-g" style="flex:1;min-width:64px;font-size:13px;padding:10px 0;border-radius:10px" onclick="App._setAmt(100)">100</button>
         <button class="btn-g" style="flex:1;min-width:64px;font-size:13px;padding:10px 0;border-radius:10px" onclick="App._setAmt(300)">300</button>
@@ -582,16 +583,16 @@ label.lbl{display:block;font-size:12px;color:var(--t2);margin-bottom:8px;font-fa
       <!-- ช่องทาง -->
       <label class="lbl">ช่องทางชำระเงิน</label>
       <div class="mth-tabs" style="margin-bottom:6px">
-        <div class="mth-tab sel" id="mth-promptpay" onclick="App.selMethod('promptpay')"><span class="mi"><i class="fa-solid fa-mobile-screen"></i></span>PromptPay</div>
-        <div class="mth-tab" id="mth-bank" onclick="App.selMethod('bank')"><span class="mi"><i class="fa-solid fa-building-columns"></i></span>โอนธนาคาร</div>
-        <div class="mth-tab" id="mth-angpao" onclick="App.selMethod('angpao')"><span class="mi"><i class="fa-solid fa-envelope-open-text"></i></span>ซองอั้งเปา</div>
+        <div class="mth-tab" id="mth-promptpay" onclick="App.selMethod('promptpay')" style="display:none"><span class="mi"><i class="fa-solid fa-mobile-screen"></i></span>PromptPay</div>
+        <div class="mth-tab" id="mth-bank" onclick="App.selMethod('bank')" style="display:none"><span class="mi"><i class="fa-solid fa-building-columns"></i></span>โอนธนาคาร</div>
+        <div class="mth-tab sel" id="mth-angpao" onclick="App.selMethod('angpao')"><span class="mi"><i class="fa-solid fa-envelope-open-text"></i></span>ซองอั้งเปา</div>
       </div>
       <div id="tp-pay-content"></div>
       <div id="tp-err" style="display:none;color:#ef4444;font-size:12px;margin-top:10px;padding:10px 14px;background:rgba(239,68,68,.08);border-radius:var(--r);border:1px solid rgba(239,68,68,.18)"></div>
       <button id="tp-btn" class="btn-w" style="width:100%;padding:15px;margin-top:16px;font-size:14.5px" onclick="App.doTopup()">
         <span id="tp-btxt">ยืนยัน & สร้าง QR</span>
       </button>
-      <p style="font-size:11px;color:var(--t3);text-align:center;margin-top:12px"><i class="fa-solid fa-circle-info"></i> ระบบจำลอง · เจ้าหน้าที่จะเติมเครดิตหลังระบบตรวจสอบความถูกต้อง</p>
+      <p style="font-size:11px;color:var(--t3);text-align:center;margin-top:12px"><i class="fa-solid fa-circle-info"></i> ส่งลิงก์ซองอั่งเปาแล้วรอแอดมินเปิดซองและอนุมัติเครดิต</p>
     </div>
     <!-- Step 2: แสดง QR / บัญชี -->
     <div id="tp-s2" style="display:none;text-align:center">
@@ -834,6 +835,7 @@ const DEFAULT_ITEMS=[
 const DEFAULT_SITE={
   name:'WexZ Store Premium', logo:'WexZ', sub:'Store',
   bg:'#f8f6fc', accent:'#a855f7', adminPass:'wexzadmin',
+  bankAcc:'654-3-21098-7', bankName:'บริษัท WexZ Store จำกัด', promptpay:'0812345678',
 };
 
 const ITEM_COLOR = '#8b5cf6'; 
@@ -957,7 +959,7 @@ let _uid=1;const uid=()=>_uid++;
 
 const App={
   st:{user:null,page:'shop',coins:0,pending:[],history:[],pendingStates:{},currentCat:null,gachaSpinning:false,gachaCat:null,adminOpen:false,logoClicks:0,adminAuthed:false,
-    txHistory:[],usedCodes:[],selMethod:'promptpay',selBank:null,topupAmt:'',topupStep:'input'},
+    txHistory:[],usedCodes:[],selMethod:'angpao',selBank:null,topupAmt:'',topupStep:'input'},
 
   TEST_IDS:['WexZTest','AdminTest','TestAdmin'],
   isTest(){return this.TEST_IDS.some(id=>id.toLowerCase()===(this.st.user?.username||'').toLowerCase());},
@@ -983,9 +985,60 @@ const App={
     const sess=Session.load();
     if(sess){this.st.user=sess.user;this.st.coins=sess.coins||0;this.st.txHistory=sess.txHistory||[];this.st.usedCodes=sess.usedCodes||[];this.st.pending=sess.pending||[];this.st.pendingStates=sess.pendingStates||{};}
     this.applyTheme();this.renderHeader();this.renderCats();this.renderGachaCats();
+    if(this.st.user)this._syncPlayerCoins(true);
   },
 
   _saveSession(){Session.save({user:this.st.user,coins:this.st.coins,txHistory:this.st.txHistory,usedCodes:this.st.usedCodes,pending:this.st.pending,pendingStates:this.st.pendingStates});},
+  _paymentInfo(){
+    const s=Store.site();
+    return {
+      name:'ธนาคารกสิกรไทย (KBank)',
+      acc:s.bankAcc||this.KBANK.acc,
+      holder:s.bankName||this.KBANK.holder,
+      promptpay:s.promptpay||this.KBANK.promptpay,
+    };
+  },
+  _esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));},
+  _methodLabel(m){return m==='promptpay'?'PromptPay Auto':m==='angpao'?'ซองอั่งเปา TrueMoney':'โอนธนาคาร';},
+  _topupStatusLabel(st){
+    return st==='approved'?'อนุมัติแล้ว':st==='rejected'?'ปฏิเสธแล้ว':'รอตรวจสอบ';
+  },
+  _topupStatusStyle(st){
+    if(st==='approved')return {bg:'#f0fdf4',border:'rgba(16,185,129,.25)',color:'#059669'};
+    if(st==='rejected')return {bg:'#fef2f2',border:'rgba(239,68,68,.25)',color:'#dc2626'};
+    return {bg:'#fffbeb',border:'rgba(245,158,11,.25)',color:'#d97706'};
+  },
+  _fnUrl(name){
+    return `${CONFIG.SUPABASE_URL.replace(/\/$/,'')}/functions/v1/${name}`;
+  },
+  async _callTopupFn(name,payload){
+    const res=await fetch(this._fnUrl(name),{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization':'Bearer '+CONFIG.SUPABASE_ANON,
+        'apikey':CONFIG.SUPABASE_ANON,
+      },
+      body:JSON.stringify(payload||{}),
+    });
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(data.error||data.message||`HTTP ${res.status}`);
+    return data;
+  },
+  async _syncPlayerCoins(silent=true){
+    if(!sb||!this.st.user?.roblox_id)return;
+    try{
+      const {data,error}=await sb.from('players').select('coins').eq('roblox_id',this.st.user.roblox_id).single();
+      if(error||!data)return;
+      const coins=Number(data.coins||0);
+      if(coins!==this.st.coins){
+        this.st.coins=coins;
+        this._saveSession();
+        this.renderHeader();
+        if(!silent)this.toast('อัปเดตยอดเครดิตล่าสุดแล้ว','success');
+      }
+    }catch(e){}
+  },
   _orderItemId(item){
     const n=Number(item?.id);
     return Number.isInteger(n)&&n>0&&n<=2147483647?n:999999;
@@ -1245,16 +1298,11 @@ const App={
     this.st.coins = newCoins;
     this.st.txHistory.unshift({id:uid(),type:'spend',icon:'<i class="fa-solid fa-cart-shopping" style="color:var(--accent)"></i>',name:'ซื้อ '+item.name,amt:-item.price,ts:Date.now()});
     this._saveSession();
-    // บันทึก Supabase
     const roblox_id = this.st.user?.roblox_id;
-    let orderPid = uid();
+    const orderPid = uid();
     if(sb && roblox_id) {
       try {
         await sb.from('players').update({coins:newCoins}).eq('roblox_id',roblox_id);
-        const {data:order} = await sb.from('orders')
-          .insert({roblox_id,item_id:this._orderItemId(item),item_name:item.name,source:'shop',status:'pending'})
-          .select().single();
-        if(order?.id) orderPid = order.id;
       } catch(e) { console.warn('[WexZ] Supabase buyItem:', e.message); }
     }
     this.st.pending.push({pid:orderPid,item,source:'shop',roblox_id});
@@ -1401,28 +1449,14 @@ const App={
         
         const pid=uid();
         this.st.history.unshift({pid,item});if(this.st.history.length>5)this.st.history.pop();
-        // บันทึก Supabase gacha order
         const roblox_id = this.st.user?.roblox_id;
-        let realPid = pid;
         if(sb && roblox_id) {
           sb.from('players').update({coins:this.st.coins}).eq('roblox_id',roblox_id)
             .then(({error})=>{ if(error) console.warn('[WexZ] Gacha coin update:', error.message); });
-          sb.from('orders').insert({roblox_id,item_id:this._orderItemId(item),item_name:item.name,source:'gacha',status:'pending'})
-            .select().single().then(({data:order})=>{
-              if(order?.id) realPid=order.id;
-              this.st.pending.push({pid:realPid,item,source:`Gacha: ${cat.label}`,roblox_id});
-              this._saveSession();
-              this.renderHeader();this._renderGachaBtn(cat);
-            }).catch(()=>{
-              this.st.pending.push({pid,item,source:`Gacha: ${cat.label}`});
-              this._saveSession();
-              this.renderHeader();this._renderGachaBtn(cat);
-            });
-        } else {
-          this.st.pending.push({pid,item,source:`Gacha: ${cat.label}`});
-          this._saveSession();
-          this.renderHeader();this._renderGachaBtn(cat);
         }
+        this.st.pending.push({pid,item,source:`Gacha: ${cat.label}`,roblox_id});
+        this._saveSession();
+        this.renderHeader();this._renderGachaBtn(cat);
         
         const pct=Math.round(((item.chance||1)/pool.reduce((s,x)=>s+(x.chance||1),0))*1000)/10;
         reveal.style.display='block';
@@ -1703,12 +1737,29 @@ const App={
       try {
         let updated = [];
         if(pidLooksUuid){
-          const updateResult = await sb.from('orders').update({status:'pending'})
+          const existingResult = await sb.from('orders').select('id,status')
             .eq('id', String(pid)).eq('roblox_id', roblox_id)
             .eq('item_name', pObj.item.name)
-            .select('id');
-          if(updateResult.error) throw updateResult.error;
-          updated = updateResult.data || [];
+            .limit(1);
+          if(existingResult.error) throw existingResult.error;
+          const existing = (existingResult.data || [])[0];
+          if(existing?.status === 'delivered'){
+            this.st.pending = this.st.pending.filter(x=>x.pid!=pid);
+            delete this.st.pendingStates[pid];
+            this._saveSession();
+            this.toast(`${pObj.item.name} อยู่ใน Roblox แล้ว จึงลบออกจากคลังพัก`,'success');
+            if(this.st.page==='pending')this.renderPending();
+            this.renderHeader();
+            return;
+          }
+          if(existing?.id){
+            const updateResult = await sb.from('orders').update({status:'pending'})
+              .eq('id', String(pid)).eq('roblox_id', roblox_id)
+              .eq('item_name', pObj.item.name)
+              .select('id');
+            if(updateResult.error) throw updateResult.error;
+            updated = updateResult.data || [];
+          }
         }
         if(updated?.[0]?.id){
           activePid = updated[0].id;
@@ -1811,11 +1862,13 @@ const App={
     const totalSpent=this.st.txHistory.filter(x=>x.type==='spend').reduce((s,x)=>s+Math.abs(x.amt),0);
     const txRows=this.st.txHistory.slice(0,20).map(tx=>{
       const plus=tx.amt>0;
-      const bg=plus?'rgba(16,185,129,.08)':'rgba(168,85,247,.06)';
+      const wait=tx.amt===0;
+      const bg=wait?'rgba(245,158,11,.08)':plus?'rgba(16,185,129,.08)':'rgba(168,85,247,.06)';
+      const amtLabel=wait?'รอตรวจ':`${plus?'+':''}${tx.amt.toLocaleString()} <i class="fa-solid fa-coins"></i>`;
       return `<div class="tx-row">
         <div class="tx-icon" style="background:${bg};border:1px solid rgba(168,85,247,.04)">${tx.icon}</div>
         <div class="tx-info"><div class="tx-name">${tx.name}</div><div class="tx-time">${new Date(tx.ts).toLocaleString('th-TH',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'})}</div></div>
-        <div class="tx-amt" style="color:${plus?'#10b981':'var(--accent)'}">${plus?'+':''}${tx.amt.toLocaleString()} <i class="fa-solid fa-coins"></i></div>
+        <div class="tx-amt" style="color:${wait?'#d97706':plus?'#10b981':'var(--accent)'}">${amtLabel}</div>
       </div>`;
     }).join('');
 
@@ -1842,11 +1895,52 @@ const App={
           <button class="pf-btn danger" onclick="App.doLogout()"><i class="fa-solid fa-arrow-right-from-bracket"></i> ลบบัญชีเชื่อมต่อ</button>
         </div>
       </div>
+      <div id="topup-status-box" style="margin-top:20px"></div>
       <div class="section-hd">บันทึกธุรกรรมล่าสุด (Transaction Logs)</div>
       ${this.st.txHistory.length===0
         ?`<div style="text-align:center;padding:48px 20px;color:var(--t3);font-size:13.5px;background:#fff;border:1px solid rgba(168,85,247,.08);border-radius:20px;box-shadow:var(--shadow-sm)">ยังไม่มีการบันทึกประวัติกิจกรรมของคุณ</div>`
         :`<div class="tx-list">${txRows}</div>`}
     </div>`;
+    this._renderTopupStatus();
+  },
+
+  async _renderTopupStatus(){
+    const box=document.getElementById('topup-status-box');
+    if(!box||!this.st.user?.roblox_id)return;
+    if(!sb||CONFIG.SUPABASE_URL==='https://XXXX.supabase.co'){
+      box.innerHTML='';
+      return;
+    }
+    try{
+      await this._syncPlayerCoins(true);
+      const {data,error}=await sb.from('topup_requests')
+        .select('id,amount,credits,method,status,proof,created_at,reviewed_at,note')
+        .eq('roblox_id',this.st.user.roblox_id)
+        .order('created_at',{ascending:false})
+        .limit(5);
+      if(error)throw error;
+      if(!data?.length){box.innerHTML='';return;}
+      box.innerHTML=`
+        <div class="section-hd" style="margin-top:0">สถานะคำขอเติมเงินล่าสุด</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${data.map(r=>{
+            const sty=this._topupStatusStyle(r.status);
+            return `<div style="display:flex;align-items:center;gap:12px;justify-content:space-between;background:#fff;border:1px solid ${sty.border};border-radius:16px;padding:14px 16px;box-shadow:var(--shadow-sm)">
+              <div style="min-width:0">
+                <div style="font-size:13.5px;font-weight:800;color:var(--t1)">${this._methodLabel(r.method)} · ${Number(r.amount||0).toLocaleString()} บาท</div>
+                <div style="font-size:11px;color:var(--t3);font-family:var(--font-mono);margin-top:3px">${String(r.id).slice(0,8)} · ${new Date(r.created_at).toLocaleString('th-TH')}</div>
+                ${r.note?`<div style="font-size:11.5px;color:#dc2626;margin-top:5px">${r.note}</div>`:''}
+              </div>
+              <div style="flex-shrink:0;text-align:right">
+                <div style="font-size:11px;font-weight:800;color:${sty.color};background:${sty.bg};border:1px solid ${sty.border};padding:5px 10px;border-radius:100px">${this._topupStatusLabel(r.status)}</div>
+                <div style="font-size:11px;color:var(--t2);margin-top:5px">+${Number(r.credits||0).toLocaleString()} เครดิต</div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`;
+    }catch(e){
+      box.innerHTML=`<div style="background:#fef2f2;border:1px solid #fecaca;color:#dc2626;border-radius:14px;padding:12px 14px;font-size:12.5px">โหลดสถานะเติมเงินไม่สำเร็จ: ${e.message}</div>`;
+    }
   },
 
   doLogout(){
@@ -1869,22 +1963,23 @@ const App={
   openTopup(){
     if(!this.st.user){this.openLogin();return;}
     SFX.init();SFX.click();
-    this.st.selMethod='bank';this.st.topupAmt='';
+    this.st.selMethod='angpao';this.st.topupAmt='';
     document.getElementById('tp-amt').value='';
     document.getElementById('tp-credit-preview').textContent='';
     document.getElementById('tp-err').style.display='none';
     document.getElementById('tp-s1').style.display='block';
     document.getElementById('tp-s2').style.display='none';
-    document.getElementById('tp-btxt').innerHTML='<i class="fa-solid fa-arrow-right"></i> ดูรายละเอียดการโอน';
+    document.getElementById('tp-btxt').innerHTML='รับซองอั่งเปาอัตโนมัติ';
     document.getElementById('tp-btn').disabled=false;
     
     ['promptpay','bank','angpao'].forEach(m=>{
       const el=document.getElementById('mth-'+m);
       if(el){
-        if(m==='promptpay') el.style.display='none';
-        else el.className='mth-tab'+(m===this.st.selMethod?' sel':'');
+        el.style.display=m==='angpao'?'':'none';
+        el.className='mth-tab'+(m===this.st.selMethod?' sel':'');
       }
     });
+    this._updateTopupAmountVisibility();
     this._renderTopupPay();
     document.getElementById('topup-modal').classList.add('show');
     setTimeout(()=>document.getElementById('tp-amt').focus(),150);
@@ -1903,25 +1998,49 @@ const App={
     else el.textContent='';
   },
 
+  _updateTopupAmountVisibility(){
+    const show=this.st.selMethod!=='angpao';
+    ['tp-amt-label','tp-amt-wrap','tp-credit-preview','tp-quick-amounts'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el)el.style.display=show?'':'none';
+    });
+  },
+
   selMethod(m){
     this.st.selMethod=m;
-    ['bank','angpao'].forEach(t=>{
+    ['promptpay','bank','angpao'].forEach(t=>{
       const el=document.getElementById('mth-'+t);
       if(el)el.className='mth-tab'+(t===m?' sel':'');
     });
-    const amtEl=document.getElementById('tp-amt');
     const btxtEl=document.getElementById('tp-btxt');
-    if(amtEl)amtEl.style.display=m==='angpao'?'none':'block';
-    if(btxtEl)btxtEl.innerHTML=m==='angpao'?'ใช้รหัสซองอั้งเปา':'<i class="fa-solid fa-arrow-right"></i> ดูรายละเอียดการโอน';
+    if(btxtEl)btxtEl.innerHTML=
+      m==='promptpay'?'<i class="fa-solid fa-qrcode"></i> สร้าง QR PromptPay':
+      m==='angpao'?'รับซองอั่งเปาอัตโนมัติ':
+      '<i class="fa-solid fa-arrow-right"></i> ดูรายละเอียดการโอน';
+    this._updateTopupAmountVisibility();
     this._renderTopupPay();
   },
 
   _renderTopupPay(){
     const el=document.getElementById('tp-pay-content');if(!el)return;
     const m=this.st.selMethod;
-    const b=this.KBANK;
+    const b=this._paymentInfo();
     
-    if(m==='bank'){
+    if(m==='promptpay'){
+      el.innerHTML=`
+        <div style="background:rgba(20,184,166,.06);border:1.5px solid rgba(20,184,166,.22);border-radius:16px;padding:18px 20px">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+            <div style="width:42px;height:42px;border-radius:10px;background:#14b8a6;display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;flex-shrink:0"><i class="fa-solid fa-qrcode"></i></div>
+            <div>
+              <div style="font-weight:700;font-size:14px">PromptPay Auto</div>
+              <div style="font-size:11.5px;color:var(--t2)">สร้าง QR จริงผ่าน Opn Payments และเครดิตเข้าอัตโนมัติเมื่อชำระสำเร็จ</div>
+            </div>
+          </div>
+          <div style="font-size:12px;color:#0f766e;line-height:1.6;background:rgba(255,255,255,.58);border-radius:12px;padding:10px 12px">
+            สแกน QR จากแอปธนาคาร ยอดต้องตรงกับที่เลือก ระบบจะรอ webhook และตรวจสถานะจาก server ให้เอง
+          </div>
+        </div>`;
+    }else if(m==='bank'){
       el.innerHTML=`
         <div style="background:rgba(0,107,44,.06);border:1.5px solid rgba(0,107,44,.2);border-radius:16px;padding:18px 20px">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
@@ -1950,15 +2069,15 @@ const App={
       el.innerHTML = `
         <div class="angpao-wrap">
           <div style="color:#d97706;font-size:32px;margin-bottom:12px"><i class="fa-solid fa-envelope-open-text"></i></div>
-          <div style="font-weight:700;color:#92400e;font-size:16px">กรอกรหัสซองอั้งเปา (Truemoney)</div>
-          <div style="font-size:12.5px;color:#b45309;margin-top:6px">รองรับเฉพาะลิ้งค์ซองของแอปทรูมันนี่วอลเล็ทเท่านั้น</div>
+          <div style="font-weight:700;color:#92400e;font-size:16px">ส่งลิงก์ซองอั่งเปา TrueMoney</div>
+          <div style="font-size:12.5px;color:#b45309;margin-top:6px">กรอกยอดให้ตรงกับมูลค่าซอง แล้วแอดมินจะเปิดซองจริงก่อนอนุมัติเครดิต</div>
           <input type="text" id="tp-angpao-code" placeholder="https://gift.truemoney.com/campaign/?v=...">
         </div>
       `;
     }
   },
 
-  doTopup(){
+  async doTopup(){
     if(!this.st.user){this.openLogin();return;}
     const m=this.st.selMethod;
     const err=document.getElementById('tp-err');
@@ -1967,34 +2086,28 @@ const App={
     if(m==='angpao'){
       const code=document.getElementById('tp-angpao-code')?.value.trim();
       if(!code || !code.includes('gift.truemoney.com')){
-        SFX.err();err.style.display='block';err.textContent='รูปแบบลิ้งค์ซองอั้งเปาไม่ถูกต้อง';return;
+        SFX.err();err.style.display='block';err.textContent='รูปแบบลิงก์ซองอั่งเปาไม่ถูกต้อง';return;
       }
-      err.style.display='none';
-      SFX.spin();
-      const btn = document.getElementById('tp-btn');
-      btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-circle-notch fa-spin"></i> กำลังตรวจสอบซอง...';
-      setTimeout(()=>{
-        SFX.ok();
-        this.st.coins += 100;
-        this.st.txHistory.unshift({id:uid(),type:'topup',icon:'<i class="fa-solid fa-envelope-open-text" style="color:#d97706"></i>',name:'เติมเงินผ่านซองอั้งเปา',amt:100,ts:Date.now()});
-        this._saveSession();
-        this.renderHeader();
-        this.closeTopup();
-        this.toast('ได้รับ 100 เครดิตจากซองอั้งเปาแล้ว!','success');
-        if(this.st.page==='profile') this.renderProfile();
-      },1500);
+      await this._redeemAngpaoAuto(code);
       return;
     }
 
     const amt=parseInt(document.getElementById('tp-amt').value);
     if(!amt||amt<10){SFX.err();err.style.display='block';err.textContent='กรุณาระบุจำนวนเงินขั้นต่ำ 10 บาท';return;}
+    if(amt>10000){SFX.err();err.style.display='block';err.textContent='เติมได้สูงสุดครั้งละ 10,000 บาท';return;}
+
+    if(m==='promptpay'){
+      await this._createPromptPayTopup(amt);
+      return;
+    }
+
     err.style.display='none';SFX.click();
     this.st.topupAmt=amt;
     document.getElementById('tp-s1').style.display='none';
     document.getElementById('tp-s2').style.display='block';
     
     if(m==='bank'){
-      const b = this.KBANK;
+      const b = this._paymentInfo();
       document.getElementById('tp-s2-content').innerHTML=`
         <div style="font-size:14px;color:var(--t2);margin-bottom:12px">ตรวจสอบข้อมูลการโอนและชำระเงิน</div>
         <div class="acc-box" style="flex-direction:column;align-items:stretch;gap:16px;text-align:left">
@@ -2017,8 +2130,135 @@ const App={
              <span style="font-family:var(--font-mono);font-size:18px;font-weight:800;color:var(--accent)">${amt.toLocaleString()} ฿</span>
           </div>
         </div>
-        <button class="btn-w" style="width:100%;padding:14px;margin-top:16px" onclick="App._mockConfirmPay()">จำลองการแจ้งสลิป</button>
+        <div style="margin-top:14px;text-align:left">
+          <label class="lbl">หลักฐาน/เวลาโอน/เลขอ้างอิง</label>
+          <textarea id="tp-proof" class="inp" rows="3" style="resize:vertical;min-height:86px;line-height:1.6" placeholder="เช่น โอนแล้วเวลา 12:34 ยอด 100 บาท / เลขอ้างอิง / ลิงก์รูปสลิป"></textarea>
+          <div id="tp-s2-err" style="display:none;color:#ef4444;font-size:12px;margin-top:8px"></div>
+        </div>
+        <button class="btn-w" id="tp-submit-proof" style="width:100%;padding:14px;margin-top:16px" onclick="App._submitBankTopup()"><i class="fa-solid fa-paper-plane"></i> แจ้งโอนเงินจริง</button>
       `;
+    }
+  },
+
+  async _createPromptPayTopup(amount){
+    if(!this.st.user){this.openLogin();return;}
+    const err=document.getElementById('tp-err');
+    const btn=document.getElementById('tp-btn');
+    const oldHtml=btn?.innerHTML;
+    try{
+      if(!sb||CONFIG.SUPABASE_URL==='https://XXXX.supabase.co')throw new Error('ยังไม่ได้เชื่อมต่อ Supabase');
+      SFX.spin();
+      if(err)err.style.display='none';
+      if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-circle-notch fa-spin"></i> กำลังสร้าง QR...';}
+      const data=await this._callTopupFn('create-promptpay-topup',{
+        roblox_id:this.st.user.roblox_id,
+        username:this.st.user.username,
+        amount,
+      });
+      this.st.topupAmt=amount;
+      this.st.txHistory.unshift({
+        id:data.id||uid(),
+        type:'topup_pending',
+        icon:'<i class="fa-solid fa-qrcode" style="color:#14b8a6"></i>',
+        name:`PromptPay Auto ${Number(amount).toLocaleString()} บาท`,
+        amt:0,
+        ts:Date.now(),
+      });
+      this._saveSession();
+      document.getElementById('tp-s1').style.display='none';
+      document.getElementById('tp-s2').style.display='block';
+      const qr=data.qr_code_url
+        ? `<img src="${this._esc(data.qr_code_url)}" alt="PromptPay QR" style="width:220px;height:220px;object-fit:contain;border-radius:18px;border:1px solid rgba(168,85,247,.12);background:#fff;padding:10px;box-shadow:var(--shadow-sm)">`
+        : `<div id="tp-auto-qr" style="width:220px;height:220px;margin:0 auto;background:#fff;border:1px solid rgba(168,85,247,.12);border-radius:18px;display:flex;align-items:center;justify-content:center;color:var(--t3);font-size:12px">ไม่มี QR URL จาก gateway</div>`;
+      document.getElementById('tp-s2-content').innerHTML=`
+        <div style="text-align:center">
+          <div style="font-size:12px;color:var(--t2);margin-bottom:10px">สแกนจ่ายด้วย PromptPay</div>
+          ${qr}
+          <div style="margin-top:14px;font-family:var(--font-mono);font-size:24px;font-weight:900;color:var(--accent)">${Number(amount).toLocaleString()} ฿</div>
+          <div style="font-size:12px;color:var(--t2);margin-top:4px">จะได้รับ ${Number(data.credits||amount).toLocaleString()} เครดิตหลังชำระสำเร็จ</div>
+          <div id="tp-auto-status" style="margin-top:16px;background:#fffbeb;border:1px solid #fcd34d;color:#92400e;border-radius:14px;padding:12px;font-size:13px;font-weight:700">
+            <i class="fa-solid fa-circle-notch fa-spin"></i> รอการชำระเงินจาก Gateway...
+          </div>
+          <div style="font-size:11px;color:var(--t3);font-family:var(--font-mono);margin-top:10px">Charge: ${this._esc(data.charge_id||'-')} · Ref: ${this._esc(String(data.id||'').slice(0,8))}</div>
+        </div>`;
+      SFX.ok();
+      this.toast('สร้าง QR PromptPay แล้ว กรุณาสแกนจ่ายตามยอด','success');
+      this._watchPromptPayTopup(data.id,0);
+    }catch(e){
+      SFX.err();
+      if(err){err.style.display='block';err.textContent='สร้าง QR PromptPay ไม่สำเร็จ: '+e.message;}
+      this.toast('สร้าง QR PromptPay ไม่สำเร็จ: '+e.message,'error');
+      if(btn){btn.disabled=false;btn.innerHTML=oldHtml||'<i class="fa-solid fa-qrcode"></i> สร้าง QR PromptPay';}
+    }
+  },
+
+  async _watchPromptPayTopup(id,tries=0){
+    if(!id||!this.st.user?.roblox_id)return;
+    const statusEl=document.getElementById('tp-auto-status');
+    try{
+      const data=await this._callTopupFn('check-promptpay-topup',{
+        id,
+        roblox_id:this.st.user.roblox_id,
+      });
+      const topup=data.topup||{};
+      if(topup.status==='approved'){
+        await this._syncPlayerCoins(false);
+        if(statusEl)statusEl.innerHTML='<i class="fa-solid fa-circle-check"></i> ชำระสำเร็จ เครดิตเข้าแล้ว';
+        if(statusEl){statusEl.style.background='#f0fdf4';statusEl.style.borderColor='#86efac';statusEl.style.color='#166534';}
+        SFX.ok();
+        this.toast('PromptPay สำเร็จ เครดิตเข้าแล้ว','success');
+        setTimeout(()=>{this.closeTopup();if(this.st.page==='profile')this.renderProfile();},1200);
+        return;
+      }
+      if(topup.status==='rejected'){
+        if(statusEl)statusEl.innerHTML=`<i class="fa-solid fa-circle-xmark"></i> รายการไม่สำเร็จ: ${this._esc(topup.note||'ถูกปฏิเสธ')}`;
+        if(statusEl){statusEl.style.background='#fef2f2';statusEl.style.borderColor='#fecaca';statusEl.style.color='#dc2626';}
+        SFX.err();
+        return;
+      }
+      if(statusEl)statusEl.innerHTML=`<i class="fa-solid fa-circle-notch fa-spin"></i> รอชำระเงิน... (${tries+1})`;
+    }catch(e){
+      if(statusEl)statusEl.innerHTML=`<i class="fa-solid fa-circle-notch fa-spin"></i> รอ webhook / เช็คสถานะใหม่...`;
+    }
+    if(tries<60)setTimeout(()=>this._watchPromptPayTopup(id,tries+1),5000);
+  },
+
+  async _redeemAngpaoAuto(voucherUrl){
+    if(!this.st.user){this.openLogin();return;}
+    const err=document.getElementById('tp-err');
+    const btn=document.getElementById('tp-btn');
+    const oldHtml=btn?.innerHTML;
+    try{
+      if(!sb||CONFIG.SUPABASE_URL==='https://XXXX.supabase.co')throw new Error('ยังไม่ได้เชื่อมต่อ Supabase');
+      SFX.spin();
+      if(err)err.style.display='none';
+      if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-circle-notch fa-spin"></i> กำลังรับซอง...';}
+      const data=await this._callTopupFn('redeem-angpao-topup',{
+        roblox_id:this.st.user.roblox_id,
+        username:this.st.user.username,
+        voucher_url:voucherUrl,
+      });
+      this.st.coins=Number(data.new_coins||this.st.coins);
+      this.st.txHistory.unshift({
+        id:data.id||uid(),
+        type:'topup',
+        icon:'<i class="fa-solid fa-envelope-open-text" style="color:#d97706"></i>',
+        name:`รับซองอั่งเปา ${Number(data.amount||0).toLocaleString()} บาท`,
+        amt:Number(data.credits||0),
+        ts:Date.now(),
+      });
+      this._saveSession();
+      this.renderHeader();
+      SFX.ok();
+      this.closeTopup();
+      this.toast(`รับซองสำเร็จ +${Number(data.credits||0).toLocaleString()} เครดิต`,'success');
+      if(this.st.page==='profile')this.renderProfile();
+    }catch(e){
+      SFX.err();
+      const msg='รับซองอั่งเปาไม่สำเร็จ: '+e.message;
+      if(err){err.style.display='block';err.textContent=msg;}
+      this.toast(msg,'error');
+      if(btn){btn.disabled=false;btn.innerHTML=oldHtml||'รับซองอั่งเปาอัตโนมัติ';}
     }
   },
 
@@ -2028,19 +2268,64 @@ const App={
     document.getElementById('tp-s2').style.display='none';
   },
 
-  _mockConfirmPay(){
-    SFX.init();SFX.spin();
-    document.getElementById('tp-s2-content').innerHTML=`<div style="padding:40px 0;text-align:center;color:var(--accent)"><i class="fa-solid fa-circle-notch fa-spin" style="font-size:48px;margin-bottom:16px"></i><div style="font-size:14px;font-weight:600">กำลังตรวจสอบยอดเงิน...</div></div>`;
-    setTimeout(()=>{
-      SFX.ok();
-      this.st.coins += this.st.topupAmt;
-      this.st.txHistory.unshift({id:uid(),type:'topup',icon:'<i class="fa-solid fa-building-columns" style="color:#006b2c"></i>',name:'โอนเงินธนาคาร',amt:this.st.topupAmt,ts:Date.now()});
+  async _submitBankTopup(){
+    const proof=document.getElementById('tp-proof')?.value.trim()||'';
+    const err=document.getElementById('tp-s2-err');
+    if(proof.length<3){
+      SFX.err();
+      if(err){err.style.display='block';err.textContent='กรุณากรอกเวลาโอน เลขอ้างอิง หรือลิงก์สลิปก่อนส่งคำขอ';}
+      return;
+    }
+    if(err)err.style.display='none';
+    await this._createTopupRequest({method:'bank',amount:this.st.topupAmt,proof});
+  },
+
+  async _createTopupRequest({method,amount,proof}){
+    if(!this.st.user){this.openLogin();return;}
+    if(!sb||CONFIG.SUPABASE_URL==='https://XXXX.supabase.co'){
+      SFX.err();
+      this.toast('ยังไม่ได้เชื่อมต่อ Supabase จึงรับคำขอเติมเงินจริงไม่ได้','error');
+      return;
+    }
+    const btn=document.getElementById('tp-submit-proof')||document.getElementById('tp-btn');
+    const oldHtml=btn?.innerHTML;
+    try{
+      SFX.spin();
+      if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-circle-notch fa-spin"></i> กำลังส่งคำขอ...';}
+      const credits=Math.floor(Number(amount||0)*Number(CONFIG.COIN_RATE||1));
+      const payload={
+        roblox_id:this.st.user.roblox_id,
+        username:this.st.user.username,
+        amount:Number(amount),
+        credits,
+        method,
+        proof,
+        status:'pending',
+      };
+      const {data,error}=await sb.from('topup_requests').insert(payload).select('id').single();
+      if(error)throw error;
+      this.st.txHistory.unshift({
+        id:data?.id||uid(),
+        type:'topup_pending',
+        icon:method==='angpao'?'<i class="fa-solid fa-envelope-open-text" style="color:#d97706"></i>':'<i class="fa-solid fa-building-columns" style="color:#006b2c"></i>',
+        name:`แจ้งเติมเงิน ${Number(amount).toLocaleString()} บาท (${this._methodLabel(method)})`,
+        amt:0,
+        ts:Date.now(),
+      });
       this._saveSession();
-      this.renderHeader();
+      SFX.ok();
       this.closeTopup();
-      this.toast(`ได้รับ ${this.st.topupAmt} เครดิตเข้าระบบแล้ว!`,'success');
-      if(this.st.page==='profile') this.renderProfile();
-    }, 2000);
+      this.toast(`ส่งคำขอเติมเงินแล้ว รอแอดมินอนุมัติ #${String(data?.id||'').slice(0,8)}`,'success');
+      if(this.st.page==='profile')this.renderProfile();
+    }catch(e){
+      SFX.err();
+      this.toast('ส่งคำขอเติมเงินไม่สำเร็จ: '+e.message,'error');
+      if(btn){btn.disabled=false;btn.innerHTML=oldHtml||'ส่งคำขอ';}
+    }
+  },
+
+  _mockConfirmPay(){
+    return this._submitBankTopup();
   },
 
   closeTopup(){document.getElementById('topup-modal').classList.remove('show');},
@@ -2113,11 +2398,12 @@ const App={
 
   adminTab(tab){
     SFX.init();SFX.click();
-    ['cats','items','gacha','site','monitor'].forEach(t=>document.getElementById('atab-'+t).className='admin-tab'+(t===tab?' on':''));
+    ['cats','items','gacha','topups','site','monitor'].forEach(t=>document.getElementById('atab-'+t).className='admin-tab'+(t===tab?' on':''));
     const c=document.getElementById('admin-content');
     if(tab==='cats')     c.innerHTML=this._adminCats();
     if(tab==='items')    c.innerHTML=this._adminItems();
     if(tab==='gacha')    c.innerHTML=this._adminGacha();
+    if(tab==='topups')   this._adminTopups();
     if(tab==='site')     c.innerHTML=this._adminSite();
     if(tab==='monitor')  this._adminMonitor();
   },
@@ -2318,6 +2604,247 @@ const App={
     const d=Store.items();
     d.push({id:this._newItemId(),cat:catId,name:'ไอเทมใหม่',chance:10,price:100,icon:'<i class="fa-solid fa-box-open"></i>',img:'',desc:'',visible:true});
     Store.saveItems(d);this.adminTab('gacha');
+  },
+
+  /* Admin — เติมเงิน */
+  _adminTopups(){
+    const c=document.getElementById('admin-content');
+    c.innerHTML=`
+      <div style="max-width:980px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:12px;flex-wrap:wrap">
+          <div>
+            <h3 style="font-size:18px;font-weight:800;color:var(--t1)">คำขอเติมเงินจริง</h3>
+            <p style="font-size:12.5px;color:var(--t2);margin-top:4px">อนุมัติหลังตรวจสลิป/ซองอั่งเปาแล้วเท่านั้น ระบบจะบวกเครดิตเข้า players.coins</p>
+          </div>
+          <button onclick="App._topupAdminLoad()" class="btn-g" style="font-size:13px;padding:10px 18px;border-radius:100px"><i class="fa-solid fa-arrows-rotate"></i> รีเฟรช</button>
+        </div>
+        <div style="background:#fff;border:1px solid rgba(168,85,247,.1);border-radius:18px;padding:18px;margin-bottom:18px;box-shadow:var(--shadow-sm)">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+            <div>
+              <div style="font-size:14px;font-weight:800;color:var(--t1)"><i class="fa-solid fa-vial" style="color:var(--accent)"></i> เครดิตทดสอบ</div>
+              <div style="font-size:12px;color:var(--t2);margin-top:3px">เพิ่มเครดิตให้ผู้เล่นโดยตรงสำหรับทดสอบระบบร้านค้า</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn-g" style="font-size:12px;padding:8px 12px;border-radius:10px" onclick="document.getElementById('admin-credit-amount').value=100">100</button>
+              <button class="btn-g" style="font-size:12px;padding:8px 12px;border-radius:10px" onclick="document.getElementById('admin-credit-amount').value=500">500</button>
+              <button class="btn-g" style="font-size:12px;padding:8px 12px;border-radius:10px" onclick="document.getElementById('admin-credit-amount').value=1000">1,000</button>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1.2fr .8fr auto;gap:10px;align-items:end">
+            <div>
+              <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:5px">Roblox ID หรือ Username</label>
+              <input id="admin-credit-target" class="inp inp-sm" value="${this._esc(this.st.user?.roblox_id||this.st.user?.username||'')}" placeholder="RBX_8805621619 หรือ M3uai">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:5px">จำนวนเครดิต</label>
+              <input id="admin-credit-amount" class="inp inp-sm" type="number" min="1" max="100000" value="500" style="font-family:var(--font-mono);font-weight:800">
+            </div>
+            <button id="admin-credit-btn" onclick="App._adminAddCredit()" class="btn-w" style="font-size:13px;padding:11px 18px;border-radius:12px;background:linear-gradient(135deg,#10b981,#059669);border-color:#059669"><i class="fa-solid fa-plus"></i> เพิ่มเครดิต</button>
+          </div>
+        </div>
+        <div id="topup-admin-stats" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px"></div>
+        <div id="topup-admin-list" style="background:#fff;border:1px solid rgba(168,85,247,.08);border-radius:18px;overflow:hidden;box-shadow:var(--shadow-sm)">
+          <div style="text-align:center;padding:42px;color:var(--t3)"><i class="fa-solid fa-circle-notch fa-spin" style="color:var(--accent);font-size:24px"></i><div style="margin-top:10px;font-size:13px">กำลังโหลดคำขอเติมเงิน...</div></div>
+        </div>
+      </div>`;
+    this._topupAdminLoad();
+  },
+
+  async _topupAdminLoad(){
+    const list=document.getElementById('topup-admin-list');
+    const stats=document.getElementById('topup-admin-stats');
+    if(!list)return;
+    if(!sb||CONFIG.SUPABASE_URL==='https://XXXX.supabase.co'){
+      list.innerHTML=`<div style="padding:22px;color:#92400e;background:#fffbeb;border:1px solid #fcd34d;font-size:13px">ยังไม่ได้เชื่อมต่อ Supabase จึงโหลดคำขอเติมเงินไม่ได้</div>`;
+      if(stats)stats.innerHTML='';
+      return;
+    }
+    try{
+      const {data,error}=await sb.from('topup_requests')
+        .select('*')
+        .order('created_at',{ascending:false})
+        .limit(100);
+      if(error)throw error;
+      this._topupRows=data||[];
+      this._topupAdminRender();
+    }catch(e){
+      list.innerHTML=`<div style="padding:22px;color:#dc2626;background:#fef2f2;border:1px solid #fecaca;font-size:13px">โหลดคำขอเติมเงินไม่สำเร็จ: ${this._esc(e.message)}<br><span style="font-size:12px;color:#991b1b">ถ้ายังไม่เคยรัน SQL ให้รันไฟล์ wexz.sql ใน Supabase ก่อน</span></div>`;
+      if(stats)stats.innerHTML='';
+    }
+  },
+
+  _topupAdminRender(){
+    const rows=this._topupRows||[];
+    const list=document.getElementById('topup-admin-list');
+    const stats=document.getElementById('topup-admin-stats');
+    if(stats){
+      const pending=rows.filter(r=>r.status==='pending').length;
+      const approved=rows.filter(r=>r.status==='approved').length;
+      const totalApproved=rows.filter(r=>r.status==='approved').reduce((s,r)=>s+Number(r.credits||0),0);
+      stats.innerHTML=[
+        ['รอตรวจสอบ',pending,'#d97706'],
+        ['อนุมัติแล้ว',approved,'#059669'],
+        ['เครดิตที่อนุมัติ',totalApproved.toLocaleString(),'var(--accent)'],
+      ].map(([label,val,color])=>`<div style="background:#fff;border:1px solid rgba(168,85,247,.08);border-radius:16px;padding:16px;text-align:center"><div style="font-size:24px;font-weight:900;color:${color};font-family:var(--font-mono)">${val}</div><div style="font-size:12px;color:var(--t2);margin-top:4px">${label}</div></div>`).join('');
+    }
+    if(!list)return;
+    if(!rows.length){
+      list.innerHTML=`<div style="text-align:center;padding:46px 20px;color:var(--t3);font-size:13px">ยังไม่มีคำขอเติมเงิน</div>`;
+      return;
+    }
+    list.innerHTML=rows.map(r=>{
+      const sty=this._topupStatusStyle(r.status);
+      const proof=String(r.proof||'');
+      const proofHtml=proof.startsWith('http')
+        ?`<a href="${this._esc(proof)}" target="_blank" style="color:var(--accent);font-weight:700;word-break:break-all">${this._esc(proof)}</a>`
+        :`<span style="word-break:break-word">${this._esc(proof||'-')}</span>`;
+      return `<div style="padding:16px 18px;border-bottom:1px solid rgba(168,85,247,.08);display:grid;grid-template-columns:1.2fr .9fr .9fr auto;gap:14px;align-items:center">
+        <div style="min-width:0">
+          <div style="font-size:14px;font-weight:800;color:var(--t1)">${this._esc(r.username||'-')}</div>
+          <div style="font-size:11px;color:var(--t3);font-family:var(--font-mono);margin-top:3px">${this._esc(r.roblox_id||'')} · ${this._esc(String(r.id).slice(0,8))}</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:3px">${r.created_at?new Date(r.created_at).toLocaleString('th-TH'):''}</div>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:800;color:var(--t1)">${Number(r.amount||0).toLocaleString()} บาท</div>
+          <div style="font-size:12px;color:var(--t2);margin-top:3px">+${Number(r.credits||0).toLocaleString()} เครดิต · ${this._methodLabel(r.method)}</div>
+        </div>
+        <div style="font-size:12px;color:var(--t2);line-height:1.5">${proofHtml}</div>
+        <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+          <span style="font-size:11px;font-weight:800;color:${sty.color};background:${sty.bg};border:1px solid ${sty.border};padding:5px 10px;border-radius:100px">${this._topupStatusLabel(r.status)}</span>
+          ${r.status==='pending'?`
+            <button onclick="App._approveTopup('${r.id}')" class="btn-w" style="font-size:12px;padding:8px 12px;border-radius:10px;background:linear-gradient(135deg,#10b981,#059669);border-color:#059669"><i class="fa-solid fa-check"></i> อนุมัติ</button>
+            <button onclick="App._rejectTopup('${r.id}')" class="btn-g" style="font-size:12px;padding:8px 12px;border-radius:10px;color:#dc2626;border-color:#fecaca"><i class="fa-solid fa-xmark"></i> ปฏิเสธ</button>
+          `:''}
+        </div>
+      </div>`;
+    }).join('');
+  },
+
+  async _adminAddCredit(){
+    if(!sb){
+      this.toast('ยังไม่ได้เชื่อมต่อ Supabase','error');
+      return;
+    }
+    const target=(document.getElementById('admin-credit-target')?.value||'').trim();
+    const amount=Math.floor(Number(document.getElementById('admin-credit-amount')?.value||0));
+    const btn=document.getElementById('admin-credit-btn');
+    const oldHtml=btn?.innerHTML;
+    if(!target){
+      this.toast('กรุณาใส่ Roblox ID หรือ Username','error');
+      return;
+    }
+    if(!amount||amount<1||amount>100000){
+      this.toast('จำนวนเครดิตต้องอยู่ระหว่าง 1 - 100000','error');
+      return;
+    }
+    try{
+      if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-circle-notch fa-spin"></i> กำลังเพิ่ม...';}
+      const col=target.startsWith('RBX_')?'roblox_id':'username';
+      const {data:players,error:findErr}=await sb.from('players')
+        .select('username,roblox_id,coins')
+        .eq(col,target)
+        .limit(1);
+      if(findErr)throw findErr;
+      const player=players?.[0];
+      if(!player)throw new Error('ไม่พบผู้เล่นนี้ในตาราง players');
+      const newCoins=Number(player.coins||0)+amount;
+      const {error:updateErr}=await sb.from('players')
+        .update({coins:newCoins})
+        .eq('roblox_id',player.roblox_id);
+      if(updateErr)throw updateErr;
+      try{
+        await sb.from('topup_requests').insert({
+          roblox_id:player.roblox_id,
+          username:player.username,
+          amount,
+          credits:amount,
+          method:'bank',
+          provider:'admin_test',
+          proof:'Admin test credit',
+          status:'approved',
+          paid_at:new Date().toISOString(),
+          reviewed_at:new Date().toISOString(),
+          reviewed_by:this.st.user?.username||'admin',
+          note:'เครดิตทดสอบจาก Admin Panel',
+        });
+      }catch(logErr){
+        console.warn('[WexZ] Admin credit log:', logErr.message);
+      }
+      if(this.st.user?.roblox_id===player.roblox_id){
+        this.st.coins=newCoins;
+        this.st.txHistory.unshift({
+          id:uid(),
+          type:'topup',
+          icon:'<i class="fa-solid fa-vial" style="color:#10b981"></i>',
+          name:'เครดิตทดสอบจากแอดมิน',
+          amt:amount,
+          ts:Date.now(),
+        });
+        this._saveSession();
+        this.renderHeader();
+        if(this.st.page==='profile')this.renderProfile();
+      }
+      this.toast(`เพิ่มเครดิตให้ ${player.username} +${amount.toLocaleString()} สำเร็จ`,'success');
+      await this._topupAdminLoad();
+    }catch(e){
+      this.toast('เพิ่มเครดิตไม่สำเร็จ: '+e.message,'error');
+    }finally{
+      if(btn){btn.disabled=false;btn.innerHTML=oldHtml||'<i class="fa-solid fa-plus"></i> เพิ่มเครดิต';}
+    }
+  },
+
+  async _approveTopup(id){
+    if(!sb)return;
+    const ok=confirm('ยืนยันว่าได้รับเงินจริงแล้ว และต้องการเพิ่มเครดิตให้ผู้ใช้นี้?');
+    if(!ok)return;
+    try{
+      const {data:req,error:reqErr}=await sb.from('topup_requests').select('*').eq('id',id).single();
+      if(reqErr)throw reqErr;
+      if(req.status!=='pending')throw new Error('คำขอนี้ถูกจัดการไปแล้ว');
+      const {data:players,error:pErr}=await sb.from('players').select('coins').eq('roblox_id',req.roblox_id).limit(1);
+      if(pErr)throw pErr;
+      if(!players?.length)throw new Error('ไม่พบผู้เล่นในตาราง players');
+      const newCoins=Number(players[0].coins||0)+Number(req.credits||req.amount||0);
+      const {error:coinErr}=await sb.from('players').update({coins:newCoins}).eq('roblox_id',req.roblox_id);
+      if(coinErr)throw coinErr;
+      const {error:upErr}=await sb.from('topup_requests').update({
+        status:'approved',
+        reviewed_at:new Date().toISOString(),
+        reviewed_by:this.st.user?.username||'admin',
+        note:null,
+      }).eq('id',id).eq('status','pending');
+      if(upErr)throw upErr;
+      if(this.st.user?.roblox_id===req.roblox_id){
+        this.st.coins=newCoins;
+        this.st.txHistory.unshift({id, type:'topup', icon:'<i class="fa-solid fa-circle-check" style="color:#10b981"></i>', name:`เติมเงินอนุมัติ ${Number(req.amount).toLocaleString()} บาท`, amt:Number(req.credits||0), ts:Date.now()});
+        this._saveSession();
+        this.renderHeader();
+      }
+      this.toast(`อนุมัติเติมเงิน +${Number(req.credits||0).toLocaleString()} เครดิตแล้ว`,'success');
+      await this._topupAdminLoad();
+      if(this.st.page==='profile')this.renderProfile();
+    }catch(e){
+      this.toast('อนุมัติไม่สำเร็จ: '+e.message,'error');
+    }
+  },
+
+  async _rejectTopup(id){
+    if(!sb)return;
+    const note=prompt('เหตุผลที่ปฏิเสธ (เช่น ไม่พบยอดโอน / ลิงก์ซองใช้ไม่ได้)', 'ไม่พบยอดชำระ');
+    if(note===null)return;
+    try{
+      const {error}=await sb.from('topup_requests').update({
+        status:'rejected',
+        reviewed_at:new Date().toISOString(),
+        reviewed_by:this.st.user?.username||'admin',
+        note:note||'ปฏิเสธโดยแอดมิน',
+      }).eq('id',id).eq('status','pending');
+      if(error)throw error;
+      this.toast('ปฏิเสธคำขอเติมเงินแล้ว','success');
+      await this._topupAdminLoad();
+    }catch(e){
+      this.toast('ปฏิเสธไม่สำเร็จ: '+e.message,'error');
+    }
   },
 
   /* Admin — ตั้งค่าเว็บไซต์ */
