@@ -10,8 +10,15 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+try{
+  const savedTheme = localStorage.getItem('wexz_theme') || 'light';
+  document.documentElement.setAttribute('data-theme', savedTheme === 'dark' ? 'dark' : 'light');
+}catch(e){}
+</script>
 <style>
 :root{
+  color-scheme:light;
   --bg:#f8f6fc; 
   --s1:rgba(255,255,255,.92); 
   --s2:#ffffff; 
@@ -37,6 +44,22 @@
   --font-th:'Kanit',sans-serif;
   --font-mono:'DM Mono',monospace;
 }
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0e0b14;
+  --s1:rgba(24,18,33,.92);
+  --s2:#181221;
+  --s3:#241a31;
+  --b1:rgba(216,180,254,.10);
+  --b2:rgba(216,180,254,.20);
+  --b3:rgba(216,180,254,.50);
+  --t1:#f6f0ff;
+  --t2:#c7bad8;
+  --t3:#8f819f;
+  --shadow:0 24px 70px -18px rgba(0,0,0,.72);
+  --shadow-sm:0 12px 34px rgba(0,0,0,.26);
+  --shadow-active:0 20px 44px rgba(168,85,247,.25);
+}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{min-height:100%;overflow-x:hidden}
 body{
@@ -49,11 +72,21 @@ body{
   font-family:var(--font-th);
   -webkit-font-smoothing:antialiased;
 }
+:root[data-theme="dark"] body{
+  background:
+    radial-gradient(circle at 20% -10%,rgba(168,85,247,.18),transparent 32%),
+    radial-gradient(circle at 85% 8%,rgba(20,184,166,.13),transparent 28%),
+    linear-gradient(180deg,#09070d 0%,#100c18 46%,#0b0910 100%);
+  background-attachment:fixed;
+}
 button,input,select{font:inherit}
 ::-webkit-scrollbar{width:10px}
 ::-webkit-scrollbar-track{background:#f6f1fc}
 ::-webkit-scrollbar-thumb{background:#dfd2f2;border-radius:10px;border:2px solid #f6f1fc}
 ::-webkit-scrollbar-thumb:hover{background:#ca9ff0}
+:root[data-theme="dark"] ::-webkit-scrollbar-track{background:#0e0b14}
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#3a2c4d;border-color:#0e0b14}
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover{background:#5c3e7d}
 
 @keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
@@ -115,6 +148,24 @@ header:hover{
 }
 #site-logo span{color:var(--accent)!important}
 .header-user{display:flex;align-items:center;gap:16px;animation:fadeIn .4s ease}
+.header-actions{display:flex;align-items:center;gap:12px}
+.theme-toggle{
+  width:44px;
+  height:44px;
+  border:1.5px solid rgba(168,85,247,.14);
+  border-radius:14px;
+  background:#fff;
+  color:var(--accent);
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  box-shadow:var(--shadow-sm);
+  transition:all .25s cubic-bezier(.16,1,.3,1);
+  flex-shrink:0;
+}
+.theme-toggle:hover{transform:translateY(-1px);border-color:var(--b3);box-shadow:var(--shadow-active)}
+.theme-toggle i{font-size:15px}
 .coin-pill{
   background:#fff;
   border:1px solid rgba(168,85,247,.12);
@@ -466,6 +517,90 @@ label.lbl{display:block;font-size:12px;color:var(--t2);margin-bottom:8px;font-fa
 .pf-btn.accent:hover{box-shadow:0 12px 28px rgba(168,85,247,.34);transform:translateY(-1.5px)}
 .section-hd{font-size:11px;color:var(--t2);font-family:var(--font-en);text-transform:uppercase;letter-spacing:1px;margin:24px 0 12px;padding-bottom:10px;border-bottom:1.5px solid rgba(168,85,247,.08);font-weight:700}
 
+/* Dark mode layer */
+:root[data-theme="dark"] header,
+:root[data-theme="dark"] nav{
+  background:rgba(22,16,31,.78);
+  border-color:rgba(216,180,254,.14);
+  box-shadow:0 18px 48px rgba(0,0,0,.32);
+}
+:root[data-theme="dark"] header:hover{background:rgba(27,19,38,.88);box-shadow:0 18px 52px rgba(0,0,0,.4)}
+:root[data-theme="dark"] .theme-toggle,
+:root[data-theme="dark"] .coin-pill,
+:root[data-theme="dark"] .hero-tile,
+:root[data-theme="dark"] .modal,
+:root[data-theme="dark"] .inp,
+:root[data-theme="dark"] .btn-g,
+:root[data-theme="dark"] .grid-card,
+:root[data-theme="dark"] .back-btn,
+:root[data-theme="dark"] .gacha-panel,
+:root[data-theme="dark"] .admin-header,
+:root[data-theme="dark"] .admin-tabs,
+:root[data-theme="dark"] .admin-row,
+:root[data-theme="dark"] .admin-img-prev,
+:root[data-theme="dark"] .mth-tab,
+:root[data-theme="dark"] .bank-btn,
+:root[data-theme="dark"] .qr-box,
+:root[data-theme="dark"] .prof-card,
+:root[data-theme="dark"] .tx-row,
+:root[data-theme="dark"] .pf-btn{
+  background:var(--s1)!important;
+  border-color:var(--b2)!important;
+  color:var(--t1)!important;
+  box-shadow:var(--shadow-sm)!important;
+}
+:root[data-theme="dark"] .inp:focus{background:var(--s2)!important}
+:root[data-theme="dark"] .modal-wrap{background:rgba(6,4,10,.72)}
+:root[data-theme="dark"] .modal-x,
+:root[data-theme="dark"] .nav-btn.off:hover,
+:root[data-theme="dark"] .btn-g:hover:not(:disabled),
+:root[data-theme="dark"] .back-btn:hover,
+:root[data-theme="dark"] .admin-tab:hover,
+:root[data-theme="dark"] .admin-tab.on,
+:root[data-theme="dark"] .pf-btn:hover{
+  background:var(--s3)!important;
+  border-color:var(--b3)!important;
+}
+:root[data-theme="dark"] .hero-tile:nth-child(3){background:linear-gradient(135deg,rgba(26,18,38,.86),rgba(236,72,153,.08))!important}
+:root[data-theme="dark"] .gc-banner{background:#20172b;border-bottom-color:var(--b1)}
+:root[data-theme="dark"] .gc-art{
+  background:linear-gradient(135deg,color-mix(in srgb,var(--card-color) 28%,#17101f) 0%,#1b1326 58%,color-mix(in srgb,var(--card-color) 14%,#10201d) 100%),
+    repeating-linear-gradient(135deg,rgba(255,255,255,.04) 0 10px,transparent 10px 20px);
+}
+:root[data-theme="dark"] .gc-overlay{background:linear-gradient(to top,rgba(24,18,33,.98) 0%,rgba(24,18,33,.34) 52%,rgba(24,18,33,0) 100%)}
+:root[data-theme="dark"] .gc-footer,
+:root[data-theme="dark"] .page-header,
+:root[data-theme="dark"] .section-hd{border-color:var(--b1)!important}
+:root[data-theme="dark"] .gacha-orb{
+  background:radial-gradient(circle at 30% 30%,#3a2a4d 0%,#20172b 52%,#120d1a 100%);
+  border-color:var(--b2);
+  box-shadow:inset -10px -10px 30px rgba(168,85,247,.12),inset 10px 10px 20px rgba(255,255,255,.03),0 24px 56px rgba(0,0,0,.42);
+}
+:root[data-theme="dark"] .gacha-orb::before{background:rgba(255,255,255,.12)}
+:root[data-theme="dark"] .acc-box,
+:root[data-theme="dark"] .stat-box{background:var(--s3)!important;border-color:var(--b1)!important}
+:root[data-theme="dark"] .angpao-wrap{background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(120,53,15,.14));border-color:rgba(245,158,11,.45)}
+:root[data-theme="dark"] .angpao-wrap input{color:#fbbf24}
+:root[data-theme="dark"] [style*="background:#fff"]:not(img):not(canvas):not(#tp-auto-qr),
+:root[data-theme="dark"] [style*="background:#ffffff"]:not(img):not(canvas):not(#tp-auto-qr),
+:root[data-theme="dark"] [style*="background: #fff"]:not(img):not(canvas):not(#tp-auto-qr),
+:root[data-theme="dark"] [style*="background:#fafafa"],
+:root[data-theme="dark"] [style*="background:#fbf8ff"],
+:root[data-theme="dark"] [style*="background:#fdfaff"],
+:root[data-theme="dark"] [style*="background:#f8f6fc"],
+:root[data-theme="dark"] [style*="background:#f3ecfb"],
+:root[data-theme="dark"] [style*="background:#faf5ff"]{
+  background:var(--s1)!important;
+  border-color:var(--b1)!important;
+}
+:root[data-theme="dark"] [style*="color:#1e1428"],
+:root[data-theme="dark"] [style*="color:#5c526b"],
+:root[data-theme="dark"] [style*="color:#6d28d9"]{
+  color:var(--t1)!important;
+}
+:root[data-theme="dark"] pre{background:#0b0810!important;color:#ede4ff!important;border:1px solid var(--b1)}
+:root[data-theme="dark"] code{background:var(--s3)!important;color:#d8b4fe!important}
+
 /* =========================================
    RESPONSIVE (Tablet / Medium Screens)
 ========================================= */
@@ -499,6 +634,8 @@ label.lbl{display:block;font-size:12px;color:var(--t2);margin-bottom:8px;font-fa
   .modal{padding:32px 24px;max-width:calc(100% - 32px);}
   .admin-row{align-items:flex-start;flex-wrap:wrap;padding:16px;}
   .profile-name{display:none;}
+  .header-actions{gap:8px}
+  .theme-toggle{width:38px;height:38px;border-radius:12px}
   .inp{padding:12px 16px;font-size:14px;}
   .prof-card{padding:24px 20px;}
   .pf-btn-row{flex-direction:column;}
@@ -639,7 +776,12 @@ label.lbl{display:block;font-size:12px;color:var(--t2);margin-bottom:8px;font-fa
     <div id="site-logo" style="font-family:var(--font-en);font-weight:800;font-size:22px;letter-spacing:-0.5px;cursor:pointer;display:flex;align-items:center;gap:8px" onclick="App.logoClick()">
       WexZ <span style="color:var(--t2);font-weight:400">Store</span>
     </div>
-    <div id="hauth"></div>
+    <div class="header-actions">
+      <button id="theme-toggle" class="theme-toggle" type="button" onclick="App.toggleTheme()" aria-label="สลับโหมดมืด" title="สลับโหมดมืด">
+        <i class="fa-solid fa-moon"></i>
+      </button>
+      <div id="hauth"></div>
+    </div>
   </header>
 
   <nav>
@@ -967,6 +1109,7 @@ const App={
   BANK_ACCOUNT:{number:'123-4-56789-0',name:'WexZ Store',bank:'ธนาคารกสิกรไทย'},
 
   async init(){
+    this.applyColorMode();
     document.getElementById('ln').addEventListener('keydown',e=>e.key==='Enter'&&this.doLogin());
     document.getElementById('lc').addEventListener('keydown',e=>e.key==='Enter'&&this.doLogin());
 
@@ -1055,11 +1198,47 @@ const App={
     const s=Store.site();
     document.title=s.name||'WexZ Store';
     document.getElementById('site-logo').innerHTML=`${s.logo||'WexZ'} <span style="color:var(--t2);font-weight:400">${s.sub||'Store'}</span>`;
-    if(s.bg)document.documentElement.style.setProperty('--bg',s.bg);
+    if(s.bg&&this.getTheme()!=='dark')document.documentElement.style.setProperty('--bg',s.bg);
     if(s.accent){
       document.documentElement.style.setProperty('--primary',s.accent);
       document.documentElement.style.setProperty('--accent',s.accent);
     }
+    this.applyColorMode(this.getTheme(), false);
+  },
+
+  getTheme(){
+    try{return localStorage.getItem('wexz_theme')==='dark'?'dark':'light';}
+    catch(e){return document.documentElement.getAttribute('data-theme')==='dark'?'dark':'light';}
+  },
+
+  applyColorMode(mode=this.getTheme(), save=true){
+    mode = mode === 'dark' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', mode);
+    if(save){
+      try{localStorage.setItem('wexz_theme', mode);}catch(e){}
+    }
+
+    const site = Store.site();
+    if(mode === 'dark'){
+      document.documentElement.style.removeProperty('--bg');
+    }else if(site.bg){
+      document.documentElement.style.setProperty('--bg', site.bg);
+    }
+
+    const btn=document.getElementById('theme-toggle');
+    if(btn){
+      const isDark=mode==='dark';
+      btn.innerHTML=`<i class="fa-solid ${isDark?'fa-sun':'fa-moon'}"></i>`;
+      btn.setAttribute('aria-label', isDark?'สลับเป็นโหมดสว่าง':'สลับเป็นโหมดมืด');
+      btn.title=isDark?'สลับเป็นโหมดสว่าง':'สลับเป็นโหมดมืด';
+    }
+  },
+
+  toggleTheme(){
+    SFX.init();SFX.click();
+    const next=this.getTheme()==='dark'?'light':'dark';
+    this.applyColorMode(next);
+    this.toast(next==='dark'?'เปิดโหมดมืดแล้ว':'เปิดโหมดสว่างแล้ว','success');
   },
 
   logoClick(){
@@ -3367,7 +3546,7 @@ supabase functions deploy roblox-notify</pre>
       }
     }catch(e){}
   },
-  _resetAll(){if(!confirm('รีเซ็ตข้อมูลทั้งหมด?'))return;['cats','items','site','ver','config'].forEach(k=>localStorage.removeItem('wexz_'+k));location.reload();}
+  _resetAll(){if(!confirm('รีเซ็ตข้อมูลทั้งหมด?'))return;['cats','items','site','ver','config','theme'].forEach(k=>localStorage.removeItem('wexz_'+k));location.reload();}
 };
 
 window.onload = () => App.init();
