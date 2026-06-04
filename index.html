@@ -1574,6 +1574,7 @@ const App={
     }
     const roblox_id = pObj.roblox_id || this.st.user?.roblox_id;
     let activePid = pid;
+    let dbError = null;
     if(sb && roblox_id) {
       try {
         const {data:updated,error} = await sb.from('orders').update({status:'pending'})
@@ -1598,41 +1599,50 @@ const App={
         }
       } catch(e) {
         console.warn('[WexZ] Claim update:', e.message);
-        SFX.err();st.status='idle';
-        this.toast('ส่งคำสั่งเข้า Roblox ไม่สำเร็จ กรุณาลองใหม่','error');
-        if(this.st.page==='pending')this.renderPending();
-        return;
+        dbError = e;
       }
     }
     // ── ส่ง Roblox Webhook ──
     let delivered = false;
+    let deliveryVia = '';
+    const payload = {
+      roblox_id : pObj.roblox_id || this.st.user?.roblox_id || '',
+      item_id   : pObj.item.id,
+      item_name : pObj.item.name,
+      source    : pObj.source,
+      order_id  : String(activePid),
+      timestamp : Date.now(),
+    };
     if(pObj && CONFIG.ROBLOX_API_KEY !== 'YOUR_OPEN_CLOUD_API_KEY') {
       try {
-        const res = await fetch(CONFIG.ROBLOX_WEBHOOK,{
-          method:'POST',
-          headers:{'Content-Type':'application/json','x-api-key':CONFIG.ROBLOX_API_KEY},
-          body:JSON.stringify({
-            roblox_id : pObj.roblox_id || this.st.user?.roblox_id || '',
-            item_id   : pObj.item.id,
-            item_name : pObj.item.name,
-            source    : pObj.source,
-            order_id  : String(activePid),
-            timestamp : Date.now(),
-          }),
-        });
-        delivered = res.ok;
-      } catch(e){ console.warn('[WexZ] Webhook:', e.message); }
+        const result = await this._callRobloxWebhook(payload);
+        delivered = true;
+        deliveryVia = result?.via || 'webhook';
+      } catch(e){
+        console.warn('[WexZ] Webhook:', e.message);
+        if(dbError){
+          SFX.err();st.status='idle';
+          this.toast('ส่งคำสั่งเข้า Roblox ไม่สำเร็จ: '+(dbError.message||e.message),'error');
+          if(this.st.page==='pending')this.renderPending();
+          return;
+        }
+      }
+    }else if(dbError){
+      SFX.err();st.status='idle';
+      this.toast('ส่งคำสั่งเข้า Roblox ไม่สำเร็จ: '+dbError.message,'error');
+      if(this.st.page==='pending')this.renderPending();
+      return;
     }
     await new Promise(r=>setTimeout(r,700));
     SFX.ok();st.status='waiting';
     if(pObj){
       const label = delivered
-        ? `ส่งสัญญาณ ${pObj.item.name} แล้ว — รอ Roblox รับของ`
+        ? `ส่งสัญญาณ ${pObj.item.name} แล้ว — รอ Roblox รับของ (${deliveryVia})`
         : `บันทึก ${pObj.item.name} แล้ว — รอ Roblox รับของในเกม`;
       this.toast(label,'success');
     }
     if(ab)ab.innerHTML=`<div style="text-align:center;font-size:13.5px;color:#8b5cf6;font-family:var(--font-mono);padding:10px 0;background:rgba(139,92,246,.08);border-radius:12px;animation:popIn .3s ease;font-weight:700">ส่งสัญญาณแล้ว — รอรับของในเกม</div>`;
-    setTimeout(()=>this._watchClaimStatus(activePid,0),3000);
+    if(!dbError)setTimeout(()=>this._watchClaimStatus(activePid,0),3000);
   },
   async _watchClaimStatus(pid, tries=0){
     const pObj=this.st.pending.find(x=>x.pid==pid);
@@ -2497,7 +2507,7 @@ end</pre>
 
   _saveConfig(){
     // บันทึก API Keys ลง localStorage ถาวร
-    const keys=['SUPABASE_URL','SUPABASE_ANON','ROBLOX_WEBHOOK','ROBLOX_API_KEY'];
+    const keys=['SUPABASE_URL','SUPABASE_ANON','ROBLOX_WEBHOOK','ROBLOX_API_KEY','EDGE_FN_URL'];
     const saved={};keys.forEach(k=>saved[k]=CONFIG[k]);
     localStorage.setItem('wexz_config',JSON.stringify(saved));
     // init sb ใหม่
