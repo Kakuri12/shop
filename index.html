@@ -858,14 +858,93 @@ try { sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON); } c
    STORE & APP
 ══════════════════════════════════════ */
 const Store={
-  _load(k,def){try{const v=localStorage.getItem('wexz_'+k);return v?JSON.parse(v):def;}catch{return def;}},
-  _save(k,v){try{localStorage.setItem('wexz_'+k,JSON.stringify(v));}catch{}},
+  _mem:{cats:null,items:null,site:null},
+  _timers:{},
+  _clone(v){try{return JSON.parse(JSON.stringify(v));}catch{return v;}},
+  _load(k,def){
+    if(this._mem[k])return this._mem[k];
+    try{
+      const v=localStorage.getItem('wexz_'+k);
+      this._mem[k]=v?JSON.parse(v):this._clone(def);
+    }catch{this._mem[k]=this._clone(def);}
+    return this._mem[k];
+  },
+  _save(k,v){
+    this._mem[k]=v;
+    try{localStorage.setItem('wexz_'+k,JSON.stringify(v));}catch{}
+    this._queueCloud(k,v);
+  },
   cats(){return this._load('cats',DEFAULT_CATS);},
   saveCats(d){this._save('cats',d);},
   items(){return this._load('items',DEFAULT_ITEMS);},
   saveItems(d){this._save('items',d);},
   site(){return this._load('site',DEFAULT_SITE);},
   saveSite(d){this._save('site',d);},
+  async loadCloud(){
+    if(!sb||CONFIG.SUPABASE_URL==='https://XXXX.supabase.co')return false;
+    try{
+      const [catRes,itemRes,siteRes]=await Promise.all([
+        sb.from('shop_categories').select('id,sort_order,data').order('sort_order',{ascending:true}),
+        sb.from('shop_items').select('id,sort_order,data').order('sort_order',{ascending:true}),
+        sb.from('shop_site_settings').select('key,data').eq('key','default').maybeSingle(),
+      ]);
+      const firstErr=catRes.error||itemRes.error||siteRes.error;
+      if(firstErr)throw firstErr;
+
+      const cats=(catRes.data||[]).map(r=>({...r.data,id:r.data?.id??r.id}));
+      const items=(itemRes.data||[]).map(r=>({...r.data,id:r.data?.id??r.id}));
+      if(cats.length){this._mem.cats=cats;try{localStorage.setItem('wexz_cats',JSON.stringify(cats));}catch{}}
+      else{this._mem.cats=this._load('cats',DEFAULT_CATS);}
+      if(items.length){this._mem.items=items;try{localStorage.setItem('wexz_items',JSON.stringify(items));}catch{}}
+      else{this._mem.items=this._load('items',DEFAULT_ITEMS);}
+      if(siteRes.data?.data){this._mem.site=siteRes.data.data;try{localStorage.setItem('wexz_site',JSON.stringify(this._mem.site));}catch{}}
+      else{this._mem.site=this._load('site',DEFAULT_SITE);}
+      return true;
+    }catch(e){
+      console.warn('[WexZ] Store cloud load:', e.message);
+      return false;
+    }
+  },
+  _queueCloud(k,v){
+    if(!sb||CONFIG.SUPABASE_URL==='https://XXXX.supabase.co')return;
+    clearTimeout(this._timers[k]);
+    this._timers[k]=setTimeout(()=>this._saveCloudNow(k,v),450);
+  },
+  async flushCloud(){
+    const keys=Object.keys(this._timers);
+    for(const k of keys){
+      clearTimeout(this._timers[k]);
+      delete this._timers[k];
+      await this._saveCloudNow(k,this._mem[k]);
+    }
+  },
+  async _replaceRows(table,rows){
+    const {data:existing,error:readErr}=await sb.from(table).select('id');
+    if(readErr)throw readErr;
+    const ids=rows.map(r=>String(r.id));
+    const stale=(existing||[]).map(r=>String(r.id)).filter(id=>!ids.includes(id));
+    if(stale.length){
+      const {error:delErr}=await sb.from(table).delete().in('id',stale);
+      if(delErr)throw delErr;
+    }
+    if(rows.length){
+      const {error:upErr}=await sb.from(table).upsert(rows,{onConflict:'id'});
+      if(upErr)throw upErr;
+    }
+  },
+  async _saveCloudNow(k,v){
+    if(!sb||CONFIG.SUPABASE_URL==='https://XXXX.supabase.co'||!v)return;
+    try{
+      if(k==='cats'){
+        await this._replaceRows('shop_categories',v.map((cat,i)=>({id:String(cat.id),sort_order:i,data:cat,updated_at:new Date().toISOString()})));
+      }else if(k==='items'){
+        await this._replaceRows('shop_items',v.map((item,i)=>({id:String(item.id),sort_order:i,data:item,updated_at:new Date().toISOString()})));
+      }else if(k==='site'){
+        const {error}=await sb.from('shop_site_settings').upsert({key:'default',data:v,updated_at:new Date().toISOString()},{onConflict:'key'});
+        if(error)throw error;
+      }
+    }catch(e){console.warn('[WexZ] Store cloud save '+k+':', e.message);}
+  },
 };
 
 let _uid=1;const uid=()=>_uid++;
@@ -879,21 +958,24 @@ const App={
   PROMPTPAY_NUMBER:'0800000000',
   BANK_ACCOUNT:{number:'123-4-56789-0',name:'WexZ Store',bank:'ธนาคารกสิกรไทย'},
 
-  init(){
+  async init(){
     document.getElementById('ln').addEventListener('keydown',e=>e.key==='Enter'&&this.doLogin());
     document.getElementById('lc').addEventListener('keydown',e=>e.key==='Enter'&&this.doLogin());
-    
-    // อัปเดทเวอร์ชั่นเพื่อรองรับไอคอนใหม่
-    const ver = Store._load('ver', 0);
-    if(ver < 7) {
-      Store.saveCats(DEFAULT_CATS);
-      Store.saveItems(DEFAULT_ITEMS);
-      Store._save('ver', 7);
+
+    this._loadConfig();  // โหลด saved API keys จาก localStorage
+    const cloudLoaded=await Store.loadCloud();
+    if(!cloudLoaded){
+      // อัปเดทเวอร์ชั่นเพื่อรองรับไอคอนใหม่ (local fallback เท่านั้น)
+      const ver = Store._load('ver', 0);
+      if(ver < 7) {
+        Store.saveCats(DEFAULT_CATS);
+        Store.saveItems(DEFAULT_ITEMS);
+        Store._save('ver', 7);
+      }
     }
 
     const sess=Session.load();
     if(sess){this.st.user=sess.user;this.st.coins=sess.coins||0;this.st.txHistory=sess.txHistory||[];this.st.usedCodes=sess.usedCodes||[];this.st.pending=sess.pending||[];this.st.pendingStates=sess.pendingStates||{};}
-    this._loadConfig();  // โหลด saved API keys จาก localStorage
     this.applyTheme();this.renderHeader();this.renderCats();this.renderGachaCats();
   },
 
@@ -2088,11 +2170,12 @@ const App={
     const prev=document.getElementById('aprev-cat-'+id);
     if(prev)prev.innerHTML=`<span style="color:var(--t1)">${icon}</span>`;
   },
-  _adminSave(){
+  async _adminSave(){
     // บันทึกข้อมูลทั้งหมดลง localStorage อีกครั้ง (belt-and-suspenders)
     Store.saveCats(Store.cats());
     Store.saveItems(Store.items());
     Store.saveSite(Store.site());
+    await Store.flushCloud();
     this.toast('💾 บันทึกทั้งหมดเรียบร้อยแล้ว!','success');
   },
   _addCat(){const d=Store.cats();d.push({id:'cat_'+Date.now(),label:'หมวดใหม่',icon:'<i class="fa-solid fa-box-open"></i>',img:'',desc:'',color:'#8b5cf6',cost:100,visible:true,type:'shop'});Store.saveCats(d);this.adminTab('cats');},
@@ -2659,86 +2742,3 @@ serve(async (req) => {
   const ROBLOX_API_KEY = Deno.env.get("ROBLOX_API_KEY") ?? ""
   const ROBLOX_WEBHOOK = Deno.env.get("ROBLOX_WEBHOOK_URL") ?? ""
 
-  if (!ROBLOX_API_KEY || !ROBLOX_WEBHOOK) {
-    return new Response(
-      JSON.stringify({ error: "ROBLOX_API_KEY or ROBLOX_WEBHOOK_URL not set" }),
-      { status: 500, headers: { ...CORS, "Content-Type": "application/json" } }
-    )
-  }
-
-  const body = await req.json()
-
-  const res = await fetch(ROBLOX_WEBHOOK, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": ROBLOX_API_KEY },
-    body: JSON.stringify({ message: JSON.stringify(body) }),
-  })
-
-  const ok = res.ok
-  return new Response(
-    JSON.stringify({ success: ok, status: res.status }),
-    { headers: { ...CORS, "Content-Type": "application/json" } }
-  )
-})</pre>
-              <button onclick="navigator.clipboard.writeText(document.getElementById('ef-code').innerText);this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy',1500)"
-                style="position:absolute;top:10px;right:10px;background:rgba(168,85,247,.15);border:1px solid rgba(168,85,247,.3);border-radius:6px;padding:4px 10px;color:#a855f7;font-size:11px;cursor:pointer;font-weight:700">Copy</button>
-            </div>
-          </div>
-
-          <div style="border:1px solid #e5d5fa;border-radius:14px;padding:16px">
-            <div style="font-size:12px;font-weight:700;color:#6d28d9;margin-bottom:10px;letter-spacing:.5px">STEP 2 — Deploy ด้วย Supabase CLI</div>
-            <pre style="background:#1e1428;color:#e2d9f3;padding:14px;border-radius:10px;font-size:12px;margin:0;line-height:1.8"># ติดตั้ง CLI ถ้ายังไม่มี
-npm install -g supabase
-
-# Login + เชื่อมต่อ project
-supabase login
-supabase link --project-ref YOUR_PROJECT_REF
-
-# ตั้งค่า Secret (API Keys)
-supabase secrets set ROBLOX_API_KEY="your_roblox_key_here"
-supabase secrets set ROBLOX_WEBHOOK_URL="https://apis.roblox.com/messaging-service/v1/universes/UNIVERSE_ID/topics/WexZItemDelivery"
-
-# Deploy function
-supabase functions deploy roblox-notify</pre>
-          </div>
-
-          <div style="border:1px solid #e5d5fa;border-radius:14px;padding:16px">
-            <div style="font-size:12px;font-weight:700;color:#6d28d9;margin-bottom:10px;letter-spacing:.5px">STEP 3 — ใส่ URL ใน Admin Panel</div>
-            <p style="font-size:12.5px;color:#5c526b;margin-bottom:8px">หลัง deploy สำเร็จ URL จะอยู่ในรูปแบบ:</p>
-            <code style="background:#f3ecfb;display:block;padding:10px 14px;border-radius:8px;font-size:12px;color:#6d28d9;word-break:break-all">https://YOURPROJECT.supabase.co/functions/v1/roblox-notify</code>
-            <p style="font-size:12px;color:#5c526b;margin-top:10px">นำ URL นี้ไปใส่ในช่อง <b>"Supabase Edge Function URL"</b> ใน Admin → ตั้งค่าเว็บไซต์</p>
-          </div>
-
-          <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:14px;padding:14px;font-size:12.5px;color:#166534">
-            <b>✅ ระบบส่งของทำงานได้แม้ไม่มี Edge Function!</b><br>
-            Roblox Lua Script จะ <b>Poll</b> ตาราง <code>pending_rewards</code> ใน Supabase ทุก 3 วินาทีอยู่แล้ว
-            Edge Function เป็นแค่การ Push แบบ real-time เพิ่มเติม (optional)
-          </div>
-        </div>
-      </div>
-    </div>`;
-    document.body.insertAdjacentHTML('beforeend', html);
-  },
-
-  _saveConfig(){
-    const keys=['SUPABASE_URL','SUPABASE_ANON','ROBLOX_WEBHOOK','ROBLOX_API_KEY','EDGE_FN_URL'];
-    const saved={};keys.forEach(k=>saved[k]=CONFIG[k]);
-    localStorage.setItem('wexz_config',JSON.stringify(saved));
-    try{sb=supabase.createClient(CONFIG.SUPABASE_URL,CONFIG.SUPABASE_ANON);}catch(e){}
-    this.toast('💾 บันทึก API Keys เรียบร้อย — ใช้ได้ถาวรแม้ reload','success');
-  },
-  _loadConfig(){
-    try{
-      const saved=JSON.parse(localStorage.getItem('wexz_config')||'{}');
-      Object.assign(CONFIG,saved);
-      if(CONFIG.SUPABASE_URL&&CONFIG.SUPABASE_URL!=='https://XXXX.supabase.co'){        try{sb=supabase.createClient(CONFIG.SUPABASE_URL,CONFIG.SUPABASE_ANON);}catch(e){}
-      }
-    }catch(e){}
-  },
-  _resetAll(){if(!confirm('รีเซ็ตข้อมูลทั้งหมด?'))return;['cats','items','site','ver','config'].forEach(k=>localStorage.removeItem('wexz_'+k));location.reload();}
-};
-
-window.onload = () => App.init();
-</script>
-</body>
-</html>
