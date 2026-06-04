@@ -993,7 +993,10 @@ const App={
         btn.innerHTML=this.spin(18)+' กำลังดึง Avatar...';
         const avatarUrl=await this._getRobloxAvatar(data.roblox_uid).catch(()=>null);
         // clear code หลัง login สำเร็จ (ใช้ได้ครั้งเดียว)
-        try{ await sb.from('players').update({login_code:null,login_code_exp:0}).eq('roblox_id',data.roblox_id); }catch(_){}
+        const {error:clearCodeError}=await sb.from('players')
+          .update({login_code:null,login_code_exp:0})
+          .eq('roblox_id',data.roblox_id);
+        if(clearCodeError) console.warn('[WexZ] Clear login code:', clearCodeError.message);
         SFX.ok();
         Session.save({user:{username:name,roblox_id:data.roblox_id,avatarUrl},coins:data.coins??0,txHistory:[],usedCodes:[]});
         location.reload();
@@ -1289,7 +1292,8 @@ const App={
         const roblox_id = this.st.user?.roblox_id;
         let realPid = pid;
         if(sb && roblox_id) {
-          sb.from('players').update({coins:this.st.coins}).eq('roblox_id',roblox_id).catch(()=>{});
+          sb.from('players').update({coins:this.st.coins}).eq('roblox_id',roblox_id)
+            .then(({error})=>{ if(error) console.warn('[WexZ] Gacha coin update:', error.message); });
           sb.from('orders').insert({roblox_id,item_id:item.id,item_name:item.name,source:'gacha',status:'pending'})
             .select().single().then(({data:order})=>{
               if(order?.id) realPid=order.id;
@@ -1549,6 +1553,7 @@ const App={
             <div id="action-${p.pid}" style="margin-top:auto;border-top:1.5px solid rgba(168,85,247,.08);padding-top:14px">
               ${st.status==='idle'?`<button onclick="App.claimItem('${p.pid}')" class="btn-g" style="width:100%;font-size:13px;color:var(--accent);border-color:var(--b2)"><i class="fa-solid fa-paper-plane"></i> ย้ายไอเทมเข้าตัวเกม</button>`:''}
               ${st.status==='sending'?`<div style="text-align:center;font-size:13.5px;color:var(--t2);padding:10px 0"><span style="display:inline-block;margin-right:8px"><i class="fa-solid fa-circle-notch fa-spin" style="color:var(--accent)"></i></span> กำลังโอนถ่ายข้อมูล...</div>`:''}
+              ${st.status==='waiting'?`<div style="text-align:center;font-size:13.5px;color:#8b5cf6;font-family:var(--font-mono);padding:10px 0;background:rgba(139,92,246,.08);border-radius:12px;font-weight:700">ส่งสัญญาณแล้ว — รอรับของในเกม</div>`:''}
               ${st.status==='done'?`<div style="text-align:center;font-size:13.5px;color:#10b981;font-family:var(--font-mono);padding:10px 0;background:rgba(16,185,129,.1);border-radius:12px;font-weight:700">สำเร็จสมบูรณ์ ✓</div>`:''}
             </div>
           </div>
@@ -1559,36 +1564,101 @@ const App={
     const st=this.st.pendingStates[pid];if(!st||st.status!=='idle')return;
     SFX.init();SFX.click();st.status='sending';
     const ab=document.getElementById('action-'+pid);
-    if(ab)ab.innerHTML=`<div style="text-align:center;font-size:13.5px;color:var(--t2);padding:10px 0"><span style="display:inline-block;margin-right:8px"><i class="fa-solid fa-circle-notch fa-spin" style="color:var(--accent)"></i></span> กำลังส่งผ่าน Edge Function...</div>`;
+    if(ab)ab.innerHTML=`<div style="text-align:center;font-size:13.5px;color:var(--t2);padding:10px 0"><span style="display:inline-block;margin-right:8px"><i class="fa-solid fa-circle-notch fa-spin" style="color:var(--accent)"></i></span> กำลังส่ง...</div>`;
     const pObj=this.st.pending.find(x=>x.pid==pid);
+    if(!pObj){
+      SFX.err();st.status='idle';
+      this.toast('ไม่พบรายการไอเทมนี้ กรุณารีเฟรชหน้าเว็บ','error');
+      if(this.st.page==='pending')this.renderPending();
+      return;
+    }
+    const roblox_id = pObj.roblox_id || this.st.user?.roblox_id;
+    let activePid = pid;
+    if(sb && roblox_id) {
+      try {
+        const {data:updated,error} = await sb.from('orders').update({status:'pending'})
+          .eq('id', String(pid)).eq('roblox_id', roblox_id)
+          .eq('item_name', pObj.item.name)
+          .select('id');
+        if(error) throw error;
+        if(updated?.[0]?.id){
+          activePid = updated[0].id;
+        }else{
+          const {data:order,error:insertError}=await sb.from('orders')
+            .insert({roblox_id,item_id:pObj.item.id,item_name:pObj.item.name,source:pObj.source,status:'pending'})
+            .select('id').single();
+          if(insertError) throw insertError;
+          if(order?.id){
+            activePid = order.id;
+            pObj.pid = activePid;
+            pObj.roblox_id = roblox_id;
+            this.st.pendingStates[activePid]=st;
+            if(String(activePid)!==String(pid)) delete this.st.pendingStates[pid];
+          }
+        }
+      } catch(e) {
+        console.warn('[WexZ] Claim update:', e.message);
+        SFX.err();st.status='idle';
+        this.toast('ส่งคำสั่งเข้า Roblox ไม่สำเร็จ กรุณาลองใหม่','error');
+        if(this.st.page==='pending')this.renderPending();
+        return;
+      }
+    }
     // ── ส่ง Roblox Webhook ──
     let delivered = false;
-    if(pObj) {
+    if(pObj && CONFIG.ROBLOX_API_KEY !== 'YOUR_OPEN_CLOUD_API_KEY') {
       try {
-        // ใช้ Edge Function แทน (ไม่มีปัญหา CORS)
-        await this._callRobloxWebhook({
-          roblox_id : pObj.roblox_id || this.st.user?.roblox_id || '',
-          item_id   : pObj.item.id,
-          item_name : pObj.item.name,
-          source    : pObj.source,
-          order_id  : String(pid),
-          timestamp : Date.now(),
+        const res = await fetch(CONFIG.ROBLOX_WEBHOOK,{
+          method:'POST',
+          headers:{'Content-Type':'application/json','x-api-key':CONFIG.ROBLOX_API_KEY},
+          body:JSON.stringify({
+            roblox_id : pObj.roblox_id || this.st.user?.roblox_id || '',
+            item_id   : pObj.item.id,
+            item_name : pObj.item.name,
+            source    : pObj.source,
+            order_id  : String(activePid),
+            timestamp : Date.now(),
+          }),
         });
-        delivered = true;
+        delivered = res.ok;
       } catch(e){ console.warn('[WexZ] Webhook:', e.message); }
     }
-    // ── เว็บไม่ mark delivered — Lua script จะ mark เมื่อส่งของจริงแล้ว ──
     await new Promise(r=>setTimeout(r,700));
-    SFX.ok();st.status='done';
-    const row=document.getElementById('pending-'+pid);if(row)row.style.opacity='.4';
+    SFX.ok();st.status='waiting';
     if(pObj){
       const label = delivered
-        ? `ส่งสัญญาณไปยัง Roblox แล้ว — รอรับของในเกม`
-        : `บันทึก ${pObj.item.name} แล้ว — Roblox จะส่งเมื่อ join เกม`;
+        ? `ส่งสัญญาณ ${pObj.item.name} แล้ว — รอ Roblox รับของ`
+        : `บันทึก ${pObj.item.name} แล้ว — รอ Roblox รับของในเกม`;
       this.toast(label,'success');
     }
-    if(ab)ab.innerHTML=`<div style="text-align:center;font-size:13.5px;color:#10b981;font-family:var(--font-mono);padding:10px 0;background:rgba(16,185,129,.1);border-radius:12px;animation:popIn .3s ease;font-weight:700">ส่งสัญญาณแล้ว — รอรับของในเกม 🎮</div>`;
-    setTimeout(()=>{this.st.pending=this.st.pending.filter(x=>x.pid!=pid);this.renderHeader();if(this.st.page==='pending')this.renderPending();},2500);
+    if(ab)ab.innerHTML=`<div style="text-align:center;font-size:13.5px;color:#8b5cf6;font-family:var(--font-mono);padding:10px 0;background:rgba(139,92,246,.08);border-radius:12px;animation:popIn .3s ease;font-weight:700">ส่งสัญญาณแล้ว — รอรับของในเกม</div>`;
+    setTimeout(()=>this._watchClaimStatus(activePid,0),3000);
+  },
+  async _watchClaimStatus(pid, tries=0){
+    const pObj=this.st.pending.find(x=>x.pid==pid);
+    if(!pObj||!sb)return;
+    const roblox_id = pObj.roblox_id || this.st.user?.roblox_id;
+    if(!roblox_id)return;
+    try{
+      const {data,error}=await sb.from('orders').select('status')
+        .eq('id',String(pid)).eq('roblox_id',roblox_id).single();
+      if(error)throw error;
+      if(data?.status==='delivered'){
+        if(this.st.pendingStates[pid])this.st.pendingStates[pid].status='done';
+        this.st.pending=this.st.pending.filter(x=>x.pid!=pid);
+        this.renderHeader();
+        if(this.st.page==='pending')this.renderPending();
+        this.toast(`${pObj.item.name} เข้าเกมแล้ว`,'success');
+        return;
+      }
+      if(data?.status==='cancelled'){
+        if(this.st.pendingStates[pid])this.st.pendingStates[pid].status='idle';
+        this.toast(`${pObj.item.name} ส่งไม่สำเร็จ: ชื่อ Tool ใน ServerStorage.Items ไม่ตรง`,'error');
+        if(this.st.page==='pending')this.renderPending();
+        return;
+      }
+    }catch(e){console.warn('[WexZ] Claim watch:', e.message);}
+    if(tries<10)setTimeout(()=>this._watchClaimStatus(pid,tries+1),3000);
   },
   claimAll(){this.st.pending.filter(p=>!this.st.pendingStates[p.pid]||this.st.pendingStates[p.pid].status==='idle').forEach((p,i)=>setTimeout(()=>this.claimItem(p.pid),i*300));},
 
