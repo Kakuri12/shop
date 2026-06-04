@@ -986,6 +986,17 @@ const App={
   },
 
   _saveSession(){Session.save({user:this.st.user,coins:this.st.coins,txHistory:this.st.txHistory,usedCodes:this.st.usedCodes,pending:this.st.pending,pendingStates:this.st.pendingStates});},
+  _orderItemId(item){
+    const n=Number(item?.id);
+    return Number.isInteger(n)&&n>0&&n<=2147483647?n:999999;
+  },
+  _newItemId(){
+    const used=new Set(Store.items().map(x=>String(x.id)));
+    let id=Math.floor(Date.now()%2000000000);
+    if(id<1000)id+=1000;
+    while(used.has(String(id)))id++;
+    return id;
+  },
 
   applyTheme(){
     const s=Store.site();
@@ -1241,7 +1252,7 @@ const App={
       try {
         await sb.from('players').update({coins:newCoins}).eq('roblox_id',roblox_id);
         const {data:order} = await sb.from('orders')
-          .insert({roblox_id,item_id:item.id,item_name:item.name,source:'shop',status:'pending'})
+          .insert({roblox_id,item_id:this._orderItemId(item),item_name:item.name,source:'shop',status:'pending'})
           .select().single();
         if(order?.id) orderPid = order.id;
       } catch(e) { console.warn('[WexZ] Supabase buyItem:', e.message); }
@@ -1396,7 +1407,7 @@ const App={
         if(sb && roblox_id) {
           sb.from('players').update({coins:this.st.coins}).eq('roblox_id',roblox_id)
             .then(({error})=>{ if(error) console.warn('[WexZ] Gacha coin update:', error.message); });
-          sb.from('orders').insert({roblox_id,item_id:item.id,item_name:item.name,source:'gacha',status:'pending'})
+          sb.from('orders').insert({roblox_id,item_id:this._orderItemId(item),item_name:item.name,source:'gacha',status:'pending'})
             .select().single().then(({data:order})=>{
               if(order?.id) realPid=order.id;
               this.st.pending.push({pid:realPid,item,source:`Gacha: ${cat.label}`,roblox_id});
@@ -1686,8 +1697,7 @@ const App={
     let activePid = pid;
     let dbError = null;
     const dbSource = String(pObj.source||'shop').toLowerCase().startsWith('gacha') ? 'gacha' : 'shop';
-    const rawItemId = Number(pObj.item?.id);
-    const dbItemId = Number.isFinite(rawItemId) && rawItemId > 0 ? Math.floor(rawItemId) : 999999;
+    const dbItemId = this._orderItemId(pObj.item);
     const pidLooksUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(pid));
     if(sb && roblox_id) {
       try {
@@ -2241,7 +2251,7 @@ const App={
     if(prev)prev.innerHTML=`<span style="color:var(--t1);font-size:20px">${icon}</span>`;
   },
   _updateItem(id,key,val){const d=Store.items();const it=d.find(x=>x.id===id);if(it)it[key]=val;Store.saveItems(d);if(this.st.currentCat)this.openCat(this.st.currentCat);},
-  _addItem(){const d=Store.items();const cats=Store.cats();d.push({id:Date.now(),cat:cats[0]?.id||'weapon',name:'ไอเทมใหม่',chance:10,price:100,icon:'<i class="fa-solid fa-box-open"></i>',img:'',desc:'',visible:true});Store.saveItems(d);this.adminTab('items');},
+  _addItem(){const d=Store.items();const cats=Store.cats();d.push({id:this._newItemId(),cat:cats[0]?.id||'weapon',name:'ไอเทมใหม่',chance:10,price:100,icon:'<i class="fa-solid fa-box-open"></i>',img:'',desc:'',visible:true});Store.saveItems(d);this.adminTab('items');},
   _delItem(id){if(!confirm('ลบไอเทมนี้?'))return;Store.saveItems(Store.items().filter(x=>x.id!==id));this.adminTab('items');this.renderCats();this.renderGachaCats();},
 
   /* Admin — กาชา จัดการ item + ราคาต่อหมวด */
@@ -2306,7 +2316,7 @@ const App={
   },
   _addItemToCat(catId){
     const d=Store.items();
-    d.push({id:Date.now(),cat:catId,name:'ไอเทมใหม่',chance:10,price:100,icon:'<i class="fa-solid fa-box-open"></i>',img:'',desc:'',visible:true});
+    d.push({id:this._newItemId(),cat:catId,name:'ไอเทมใหม่',chance:10,price:100,icon:'<i class="fa-solid fa-box-open"></i>',img:'',desc:'',visible:true});
     Store.saveItems(d);this.adminTab('gacha');
   },
 
