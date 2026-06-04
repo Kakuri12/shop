@@ -2742,3 +2742,86 @@ serve(async (req) => {
   const ROBLOX_API_KEY = Deno.env.get("ROBLOX_API_KEY") ?? ""
   const ROBLOX_WEBHOOK = Deno.env.get("ROBLOX_WEBHOOK_URL") ?? ""
 
+  if (!ROBLOX_API_KEY || !ROBLOX_WEBHOOK) {
+    return new Response(
+      JSON.stringify({ error: "ROBLOX_API_KEY or ROBLOX_WEBHOOK_URL not set" }),
+      { status: 500, headers: { ...CORS, "Content-Type": "application/json" } }
+    )
+  }
+
+  const body = await req.json()
+
+  const res = await fetch(ROBLOX_WEBHOOK, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": ROBLOX_API_KEY },
+    body: JSON.stringify({ message: JSON.stringify(body) }),
+  })
+
+  const ok = res.ok
+  return new Response(
+    JSON.stringify({ success: ok, status: res.status }),
+    { headers: { ...CORS, "Content-Type": "application/json" } }
+  )
+})</pre>
+              <button onclick="navigator.clipboard.writeText(document.getElementById('ef-code').innerText);this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy',1500)"
+                style="position:absolute;top:10px;right:10px;background:rgba(168,85,247,.15);border:1px solid rgba(168,85,247,.3);border-radius:6px;padding:4px 10px;color:#a855f7;font-size:11px;cursor:pointer;font-weight:700">Copy</button>
+            </div>
+          </div>
+
+          <div style="border:1px solid #e5d5fa;border-radius:14px;padding:16px">
+            <div style="font-size:12px;font-weight:700;color:#6d28d9;margin-bottom:10px;letter-spacing:.5px">STEP 2 — Deploy ด้วย Supabase CLI</div>
+            <pre style="background:#1e1428;color:#e2d9f3;padding:14px;border-radius:10px;font-size:12px;margin:0;line-height:1.8"># ติดตั้ง CLI ถ้ายังไม่มี
+npm install -g supabase
+
+# Login + เชื่อมต่อ project
+supabase login
+supabase link --project-ref YOUR_PROJECT_REF
+
+# ตั้งค่า Secret (API Keys)
+supabase secrets set ROBLOX_API_KEY="your_roblox_key_here"
+supabase secrets set ROBLOX_WEBHOOK_URL="https://apis.roblox.com/messaging-service/v1/universes/UNIVERSE_ID/topics/WexZItemDelivery"
+
+# Deploy function
+supabase functions deploy roblox-notify</pre>
+          </div>
+
+          <div style="border:1px solid #e5d5fa;border-radius:14px;padding:16px">
+            <div style="font-size:12px;font-weight:700;color:#6d28d9;margin-bottom:10px;letter-spacing:.5px">STEP 3 — ใส่ URL ใน Admin Panel</div>
+            <p style="font-size:12.5px;color:#5c526b;margin-bottom:8px">หลัง deploy สำเร็จ URL จะอยู่ในรูปแบบ:</p>
+            <code style="background:#f3ecfb;display:block;padding:10px 14px;border-radius:8px;font-size:12px;color:#6d28d9;word-break:break-all">https://YOURPROJECT.supabase.co/functions/v1/roblox-notify</code>
+            <p style="font-size:12px;color:#5c526b;margin-top:10px">นำ URL นี้ไปใส่ในช่อง <b>"Supabase Edge Function URL"</b> ใน Admin → ตั้งค่าเว็บไซต์</p>
+          </div>
+
+          <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:14px;padding:14px;font-size:12.5px;color:#166534">
+            <b>✅ ระบบส่งของทำงานได้แม้ไม่มี Edge Function!</b><br>
+            Roblox Lua Script จะ <b>Poll</b> ตาราง <code>pending_rewards</code> ใน Supabase ทุก 3 วินาทีอยู่แล้ว
+            Edge Function เป็นแค่การ Push แบบ real-time เพิ่มเติม (optional)
+          </div>
+        </div>
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+  },
+
+  _saveConfig(){
+    const keys=['SUPABASE_URL','SUPABASE_ANON','ROBLOX_WEBHOOK','ROBLOX_API_KEY','EDGE_FN_URL'];
+    const saved={};keys.forEach(k=>saved[k]=CONFIG[k]);
+    localStorage.setItem('wexz_config',JSON.stringify(saved));
+    try{sb=supabase.createClient(CONFIG.SUPABASE_URL,CONFIG.SUPABASE_ANON);}catch(e){}
+    this.toast('💾 บันทึก API Keys เรียบร้อย — ใช้ได้ถาวรแม้ reload','success');
+  },
+  _loadConfig(){
+    try{
+      const saved=JSON.parse(localStorage.getItem('wexz_config')||'{}');
+      Object.assign(CONFIG,saved);
+      if(CONFIG.SUPABASE_URL&&CONFIG.SUPABASE_URL!=='https://XXXX.supabase.co'){        try{sb=supabase.createClient(CONFIG.SUPABASE_URL,CONFIG.SUPABASE_ANON);}catch(e){}
+      }
+    }catch(e){}
+  },
+  _resetAll(){if(!confirm('รีเซ็ตข้อมูลทั้งหมด?'))return;['cats','items','site','ver','config'].forEach(k=>localStorage.removeItem('wexz_'+k));location.reload();}
+};
+
+window.onload = () => App.init();
+</script>
+</body>
+</html>
