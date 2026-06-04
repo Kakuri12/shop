@@ -912,11 +912,13 @@ const Store={
   },
   async flushCloud(){
     const keys=Object.keys(this._timers);
+    let ok=true;
     for(const k of keys){
       clearTimeout(this._timers[k]);
       delete this._timers[k];
-      await this._saveCloudNow(k,this._mem[k]);
+      ok = (await this._saveCloudNow(k,this._mem[k])) && ok;
     }
+    if(!ok)throw new Error('Supabase sync failed');
   },
   async _replaceRows(table,rows){
     const {data:existing,error:readErr}=await sb.from(table).select('id');
@@ -943,7 +945,11 @@ const Store={
         const {error}=await sb.from('shop_site_settings').upsert({key:'default',data:v,updated_at:new Date().toISOString()},{onConflict:'key'});
         if(error)throw error;
       }
-    }catch(e){console.warn('[WexZ] Store cloud save '+k+':', e.message);}
+      return true;
+    }catch(e){
+      console.warn('[WexZ] Store cloud save '+k+':', e.message);
+      return false;
+    }
   },
 };
 
@@ -2175,8 +2181,12 @@ const App={
     Store.saveCats(Store.cats());
     Store.saveItems(Store.items());
     Store.saveSite(Store.site());
-    await Store.flushCloud();
-    this.toast('💾 บันทึกทั้งหมดเรียบร้อยแล้ว!','success');
+    try{
+      await Store.flushCloud();
+      this.toast('💾 บันทึกทั้งหมดเรียบร้อยแล้ว!','success');
+    }catch(e){
+      this.toast('บันทึกในเครื่องแล้ว แต่ sync Supabase ไม่สำเร็จ: '+e.message,'error');
+    }
   },
   _addCat(){const d=Store.cats();d.push({id:'cat_'+Date.now(),label:'หมวดใหม่',icon:'<i class="fa-solid fa-box-open"></i>',img:'',desc:'',color:'#8b5cf6',cost:100,visible:true,type:'shop'});Store.saveCats(d);this.adminTab('cats');},
   _delCat(id){if(!confirm('ลบหมวดนี้?'))return;Store.saveCats(Store.cats().filter(x=>x.id!==id));this.adminTab('cats');this.renderCats();this.renderGachaCats();},
