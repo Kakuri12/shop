@@ -892,12 +892,12 @@ const App={
     }
 
     const sess=Session.load();
-    if(sess){this.st.user=sess.user;this.st.coins=sess.coins||0;this.st.txHistory=sess.txHistory||[];this.st.usedCodes=sess.usedCodes||[];}
+    if(sess){this.st.user=sess.user;this.st.coins=sess.coins||0;this.st.txHistory=sess.txHistory||[];this.st.usedCodes=sess.usedCodes||[];this.st.pending=sess.pending||[];this.st.pendingStates=sess.pendingStates||{};}
     this._loadConfig();  // โหลด saved API keys จาก localStorage
     this.applyTheme();this.renderHeader();this.renderCats();this.renderGachaCats();
   },
 
-  _saveSession(){Session.save({user:this.st.user,coins:this.st.coins,txHistory:this.st.txHistory,usedCodes:this.st.usedCodes});},
+  _saveSession(){Session.save({user:this.st.user,coins:this.st.coins,txHistory:this.st.txHistory,usedCodes:this.st.usedCodes,pending:this.st.pending,pendingStates:this.st.pendingStates});},
 
   applyTheme(){
     const s=Store.site();
@@ -1159,6 +1159,7 @@ const App={
       } catch(e) { console.warn('[WexZ] Supabase buyItem:', e.message); }
     }
     this.st.pending.push({pid:orderPid,item,source:'shop',roblox_id});
+    this._saveSession();
     this.toast(`สั่งซื้อ ${item.name} สำเร็จและเตรียมเข้าคลังแล้ว!`,'success');
     this.renderHeader();
     if(this.st.currentCat)this.openCat(this.st.currentCat);
@@ -1311,13 +1312,16 @@ const App={
             .select().single().then(({data:order})=>{
               if(order?.id) realPid=order.id;
               this.st.pending.push({pid:realPid,item,source:`Gacha: ${cat.label}`,roblox_id});
+              this._saveSession();
               this.renderHeader();this._renderGachaBtn(cat);
             }).catch(()=>{
               this.st.pending.push({pid,item,source:`Gacha: ${cat.label}`});
+              this._saveSession();
               this.renderHeader();this._renderGachaBtn(cat);
             });
         } else {
           this.st.pending.push({pid,item,source:`Gacha: ${cat.label}`});
+          this._saveSession();
           this.renderHeader();this._renderGachaBtn(cat);
         }
         
@@ -1588,18 +1592,24 @@ const App={
     const roblox_id = pObj.roblox_id || this.st.user?.roblox_id;
     let activePid = pid;
     let dbError = null;
+    const dbSource = String(pObj.source||'shop').toLowerCase().startsWith('gacha') ? 'gacha' : 'shop';
+    const pidLooksUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(pid));
     if(sb && roblox_id) {
       try {
-        const {data:updated,error} = await sb.from('orders').update({status:'pending'})
-          .eq('id', String(pid)).eq('roblox_id', roblox_id)
-          .eq('item_name', pObj.item.name)
-          .select('id');
-        if(error) throw error;
+        let updated = [];
+        if(pidLooksUuid){
+          const updateResult = await sb.from('orders').update({status:'pending'})
+            .eq('id', String(pid)).eq('roblox_id', roblox_id)
+            .eq('item_name', pObj.item.name)
+            .select('id');
+          if(updateResult.error) throw updateResult.error;
+          updated = updateResult.data || [];
+        }
         if(updated?.[0]?.id){
           activePid = updated[0].id;
         }else{
           const {data:order,error:insertError}=await sb.from('orders')
-            .insert({roblox_id,item_id:pObj.item.id,item_name:pObj.item.name,source:pObj.source,status:'pending'})
+            .insert({roblox_id,item_id:pObj.item.id,item_name:pObj.item.name,source:dbSource,status:'pending'})
             .select('id').single();
           if(insertError) throw insertError;
           if(order?.id){
@@ -1648,6 +1658,7 @@ const App={
     }
     await new Promise(r=>setTimeout(r,700));
     SFX.ok();st.status='waiting';
+    this._saveSession();
     if(pObj){
       const label = delivered
         ? `ส่งสัญญาณ ${pObj.item.name} แล้ว — รอ Roblox รับของ (${deliveryVia})`
@@ -1669,6 +1680,7 @@ const App={
       if(data?.status==='delivered'){
         if(this.st.pendingStates[pid])this.st.pendingStates[pid].status='done';
         this.st.pending=this.st.pending.filter(x=>x.pid!=pid);
+        this._saveSession();
         this.renderHeader();
         if(this.st.page==='pending')this.renderPending();
         this.toast(`${pObj.item.name} เข้าเกมแล้ว`,'success');
@@ -1676,6 +1688,7 @@ const App={
       }
       if(data?.status==='cancelled'){
         if(this.st.pendingStates[pid])this.st.pendingStates[pid].status='idle';
+        this._saveSession();
         this.toast(`${pObj.item.name} ส่งไม่สำเร็จ: ชื่อ Tool ใน ServerStorage.Items ไม่ตรง`,'error');
         if(this.st.page==='pending')this.renderPending();
         return;
