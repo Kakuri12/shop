@@ -1658,12 +1658,17 @@ const App={
             <div id="action-${p.pid}" style="margin-top:auto;border-top:1.5px solid rgba(168,85,247,.08);padding-top:14px">
               ${st.status==='idle'?`<button onclick="App.claimItem('${p.pid}')" class="btn-g" style="width:100%;font-size:13px;color:var(--accent);border-color:var(--b2)"><i class="fa-solid fa-paper-plane"></i> ย้ายไอเทมเข้าตัวเกม</button>`:''}
               ${st.status==='sending'?`<div style="text-align:center;font-size:13.5px;color:var(--t2);padding:10px 0"><span style="display:inline-block;margin-right:8px"><i class="fa-solid fa-circle-notch fa-spin" style="color:var(--accent)"></i></span> กำลังโอนถ่ายข้อมูล...</div>`:''}
-              ${st.status==='waiting'?`<div style="text-align:center;font-size:13.5px;color:#8b5cf6;font-family:var(--font-mono);padding:10px 0;background:rgba(139,92,246,.08);border-radius:12px;font-weight:700">ส่งสัญญาณแล้ว — รอรับของในเกม</div>`:''}
+              ${st.status==='waiting'?`<div style="display:flex;flex-direction:column;gap:8px"><div style="text-align:center;font-size:13.5px;color:#8b5cf6;font-family:var(--font-mono);padding:10px 0;background:rgba(139,92,246,.08);border-radius:12px;font-weight:700">ส่งสัญญาณแล้ว — รอรับของในเกม</div><button onclick="App.retryClaim('${p.pid}')" class="btn-g" style="width:100%;font-size:12px;color:var(--accent);border-color:var(--b2);padding:8px 12px"><i class="fa-solid fa-rotate-right"></i> ส่งอีกครั้ง</button></div>`:''}
               ${st.status==='done'?`<div style="text-align:center;font-size:13.5px;color:#10b981;font-family:var(--font-mono);padding:10px 0;background:rgba(16,185,129,.1);border-radius:12px;font-weight:700">สำเร็จสมบูรณ์ ✓</div>`:''}
             </div>
           </div>
         </div>`;
       }).join('')}</div>`;
+  },
+  retryClaim(pid){
+    if(this.st.pendingStates[pid])this.st.pendingStates[pid].status='idle';
+    this._saveSession();
+    this.claimItem(pid);
   },
   async claimItem(pid){
     const st=this.st.pendingStates[pid];if(!st||st.status!=='idle')return;
@@ -1681,6 +1686,8 @@ const App={
     let activePid = pid;
     let dbError = null;
     const dbSource = String(pObj.source||'shop').toLowerCase().startsWith('gacha') ? 'gacha' : 'shop';
+    const rawItemId = Number(pObj.item?.id);
+    const dbItemId = Number.isFinite(rawItemId) && rawItemId > 0 ? Math.floor(rawItemId) : 999999;
     const pidLooksUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(pid));
     if(sb && roblox_id) {
       try {
@@ -1697,7 +1704,7 @@ const App={
           activePid = updated[0].id;
         }else{
           const {data:order,error:insertError}=await sb.from('orders')
-            .insert({roblox_id,item_id:pObj.item.id,item_name:pObj.item.name,source:dbSource,status:'pending'})
+            .insert({roblox_id,item_id:dbItemId,item_name:pObj.item.name,source:dbSource,status:'pending'})
             .select('id').single();
           if(insertError) throw insertError;
           if(order?.id){
@@ -1713,12 +1720,18 @@ const App={
         dbError = e;
       }
     }
+    if(dbError){
+      SFX.err();st.status='idle';
+      this.toast('บันทึกคำสั่งส่งของลง Supabase ไม่สำเร็จ: '+dbError.message,'error');
+      if(this.st.page==='pending')this.renderPending();
+      return;
+    }
     // ── ส่ง Roblox Webhook ──
     let delivered = false;
     let deliveryVia = '';
     const payload = {
       roblox_id : pObj.roblox_id || this.st.user?.roblox_id || '',
-      item_id   : pObj.item.id,
+      item_id   : dbItemId,
       item_name : pObj.item.name,
       source    : pObj.source,
       order_id  : String(activePid),
@@ -1731,18 +1744,7 @@ const App={
         deliveryVia = result?.via || 'webhook';
       } catch(e){
         console.warn('[WexZ] Webhook:', e.message);
-        if(dbError){
-          SFX.err();st.status='idle';
-          this.toast('ส่งคำสั่งเข้า Roblox ไม่สำเร็จ: '+(dbError.message||e.message),'error');
-          if(this.st.page==='pending')this.renderPending();
-          return;
-        }
       }
-    }else if(dbError){
-      SFX.err();st.status='idle';
-      this.toast('ส่งคำสั่งเข้า Roblox ไม่สำเร็จ: '+dbError.message,'error');
-      if(this.st.page==='pending')this.renderPending();
-      return;
     }
     await new Promise(r=>setTimeout(r,700));
     SFX.ok();st.status='waiting';
