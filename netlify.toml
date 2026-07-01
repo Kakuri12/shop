@@ -1,0 +1,76 @@
+[build]
+  command = "npm run build:netlify"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+  included_files = ["scripts/source.lua"]
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/server?__path=/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/auth/*"
+  to = "/.netlify/functions/server?__path=/auth/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/loader.lua"
+  to = "/.netlify/functions/server?__path=/loader.lua"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/admin"
+  to = "/admin.html"
+  status = 200
+
+[[redirects]]
+  from = "/category"
+  to = "/category.html"
+  status = 200
+
+[[redirects]]
+  from = "/category/*"
+  to = "/products.html"
+  status = 200
+
+[[redirects]]
+  from = "/products"
+  to = "/products.html"
+  status = 200
+
+[[redirects]]
+  from = "/tools"
+  to = "/tools.html"
+  status = 200
+
+[[redirects]]
+  from = "/topup"
+  to = "/topup.html"
+  status = 200
+
+[[redirects]]
+  from = "/history"
+  to = "/history.html"
+  status = 200
+
+[[redirects]]
+  from = "/terms"
+  to = "/terms.html"
+  status = 200
+
+[[redirects]]
+  from = "/guide"
+  to = "/guide.html"
+  status = 200
+
+[[redirects]]
+  from = "/contact"
+  to = "/contact.html"
+  status = 200
