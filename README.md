@@ -25,6 +25,7 @@ npm.cmd start
 ต้องตั้งค่า Environment Variables ใน Netlify:
 
 - `ADMIN_TOKEN`
+- `SESSION_SECRET`
 - `AUTO_ISSUE_KEYS`
 - `TRUEMONEY_RECEIVER_PHONE`
 - `DISCORD_CLIENT_ID`

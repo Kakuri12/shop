@@ -19,6 +19,7 @@ const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || `http://localho
 const SESSION_COOKIE = "shora_session";
 const OAUTH_STATE_COOKIE = "shora_discord_state";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
+const SESSION_SECRET = process.env.SESSION_SECRET || ADMIN_TOKEN || DISCORD_CLIENT_SECRET || "local-session-secret";
 const COOKIE_SECURE = process.env.COOKIE_SECURE === "true";
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -495,10 +496,73 @@ function publicDiscordUser(user) {
   };
 }
 
+function base64UrlJson(value) {
+  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+}
+
+function parseBase64UrlJson(value) {
+  return JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+}
+
+function signSessionPayload(encodedPayload) {
+  return crypto.createHmac("sha256", SESSION_SECRET).update(encodedPayload).digest("base64url");
+}
+
+function safeEqualString(left, right) {
+  const leftBuffer = Buffer.from(String(left || ""), "utf8");
+  const rightBuffer = Buffer.from(String(right || ""), "utf8");
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function sessionUser(user) {
+  return {
+    id: String(user.id || ""),
+    username: String(user.username || ""),
+    global_name: String(user.global_name || user.globalName || ""),
+    avatar: user.avatar ? String(user.avatar) : null,
+  };
+}
+
+function createSignedSession(user) {
+  const createdAt = Date.now();
+  const payload = {
+    v: 1,
+    user: sessionUser(user),
+    iat: createdAt,
+    exp: createdAt + SESSION_MAX_AGE_SECONDS * 1000,
+  };
+  const encodedPayload = base64UrlJson(payload);
+  return `v1.${encodedPayload}.${signSessionPayload(encodedPayload)}`;
+}
+
+function readSignedSession(token) {
+  const parts = String(token || "").split(".");
+  if (parts.length !== 3 || parts[0] !== "v1") return null;
+
+  const [, encodedPayload, signature] = parts;
+  if (!safeEqualString(signature, signSessionPayload(encodedPayload))) return null;
+
+  try {
+    const payload = parseBase64UrlJson(encodedPayload);
+    if (!payload || payload.v !== 1 || !payload.user?.id || Number(payload.exp || 0) <= Date.now()) {
+      return null;
+    }
+    return {
+      id: token,
+      user: sessionUser(payload.user),
+      createdAt: Number(payload.iat || 0),
+      expiresAt: Number(payload.exp || 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function createSession(user) {
-  const sessionId = crypto.randomBytes(32).toString("hex");
+  const sessionId = createSignedSession(user);
   sessions.set(sessionId, {
-    user,
+    user: sessionUser(user),
     createdAt: Date.now(),
     expiresAt: Date.now() + SESSION_MAX_AGE_SECONDS * 1000,
   });
@@ -508,6 +572,10 @@ function createSession(user) {
 function sessionFromRequest(req) {
   const sessionId = parseCookies(req)[SESSION_COOKIE];
   if (!sessionId) return null;
+
+  const signedSession = readSignedSession(sessionId);
+  if (signedSession) return signedSession;
+
   const session = sessions.get(sessionId);
   if (!session) return null;
   if (session.expiresAt <= Date.now()) {
