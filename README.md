@@ -54,8 +54,19 @@ getgenv().id = "1021433794705768518"
 loadstring(game:HttpGet("https://shora-hub.netlify.app/loader.lua"))()
 ```
 
+## Supabase Backend
+
+Production ใช้ Supabase เป็น backend หลักเมื่อมี `SUPABASE_URL` และ `SUPABASE_SERVICE_ROLE_KEY`
+
+Migration อยู่ใน `supabase/migrations`:
+
+- `0001_script_license_hwid.sql` สร้าง `script_licenses` และ `script_auth_logs`
+- `0002_store_backend.sql` สร้างตารางร้าน เช่น `shora_products`, `shora_wallets`, `shora_topups`, `shora_orders`, `shora_license_keys`
+
+ข้อมูลร้านจะอ่าน/เขียน Supabase ก่อน และมี `data/store.json` เป็น local fallback สำหรับ dev หรือกรณี Supabase ใช้งานไม่ได้
+
 ## Security Notes
 
 ห้าม commit ไฟล์ `.env`, `data/store.json`, `.netlify`, `dist`, `tmp`, หรือ log ขึ้น GitHub
 
-สำหรับ production ควรใช้ Supabase เป็นแหล่งข้อมูลหลัก เพราะ Netlify Functions มี filesystem ชั่วคราวและไม่เหมาะกับการเก็บ order/key แบบถาวรในไฟล์ local
+สำหรับ production ให้ตั้งค่า Supabase env ใน Netlify เสมอ เพราะ Netlify Functions มี filesystem ชั่วคราวและไม่เหมาะกับการเก็บ order/key แบบถาวรในไฟล์ local

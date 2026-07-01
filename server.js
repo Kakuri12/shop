@@ -1207,6 +1207,180 @@ async function supabaseRequest(resource, options = {}) {
   return data;
 }
 
+async function supabaseReadAll(resource) {
+  const data = await supabaseRequest(resource);
+  return Array.isArray(data) ? data : [];
+}
+
+function rowData(row) {
+  return row?.data && typeof row.data === "object" && !Array.isArray(row.data) ? row.data : {};
+}
+
+function storeFromSupabaseRows(rows) {
+  const store = upgradeStore({
+    keys: rows.keys.map((row) => ({ ...rowData(row), key: row.license_key || rowData(row).key })),
+    orders: rows.orders.map((row) => ({ ...rowData(row), id: row.id })),
+    topups: rows.topups.map((row) => ({ ...rowData(row), id: row.id })),
+    wallets: {},
+    products: rows.products.map((row) => ({ ...rowData(row), id: row.id })),
+    inventory: {},
+    deletedProductIds: rows.deletedProducts.map((row) => row.product_id).filter(Boolean),
+  });
+
+  rows.wallets.forEach((row) => {
+    const wallet = {
+      ...rowData(row),
+      userId: row.user_id || rowData(row).userId,
+      balanceSatang: Number(row.balance_satang ?? rowData(row).balanceSatang ?? 0),
+      currency: row.currency || rowData(row).currency || "THB",
+    };
+    if (wallet.userId) store.wallets[String(wallet.userId)] = wallet;
+  });
+
+  rows.inventory.forEach((row) => {
+    if (row.product_id) store.inventory[row.product_id] = Math.max(0, Math.round(Number(row.stock || 0)));
+  });
+
+  return store;
+}
+
+async function readStoreFromSupabase() {
+  const [products, inventory, deletedProducts, wallets, topups, orders, keys] = await Promise.all([
+    supabaseReadAll("shora_products?select=*&order=created_at.asc"),
+    supabaseReadAll("shora_inventory?select=*"),
+    supabaseReadAll("shora_deleted_products?select=*"),
+    supabaseReadAll("shora_wallets?select=*"),
+    supabaseReadAll("shora_topups?select=*&order=created_at.desc"),
+    supabaseReadAll("shora_orders?select=*&order=created_at.desc"),
+    supabaseReadAll("shora_license_keys?select=*&order=created_at.desc"),
+  ]);
+
+  return storeFromSupabaseRows({ products, inventory, deletedProducts, wallets, topups, orders, keys });
+}
+
+async function readBackendStore() {
+  if (!supabaseConfigured()) return readStore();
+
+  try {
+    return await readStoreFromSupabase();
+  } catch (error) {
+    console.warn(`Supabase store read failed, using local fallback: ${error.message}`);
+    return readStore();
+  }
+}
+
+async function supabaseUpsert(resource, rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  await supabaseRequest(resource, {
+    method: "POST",
+    prefer: "resolution=merge-duplicates,return=minimal",
+    body: rows,
+  });
+}
+
+async function supabaseDeleteMissing(resource, idColumn, nextIds) {
+  const existing = await supabaseReadAll(`${resource}?select=${idColumn}`);
+  const next = new Set(nextIds.map(String));
+  const staleIds = existing.map((row) => String(row[idColumn] || "")).filter((id) => id && !next.has(id));
+  await Promise.all(
+    staleIds.map((id) =>
+      supabaseRequest(`${resource}?${idColumn}=eq.${postgrestValue(id)}`, {
+        method: "DELETE",
+        prefer: "return=minimal",
+      }),
+    ),
+  );
+}
+
+async function saveStoreToSupabase(store) {
+  const current = upgradeStore(store);
+  const timestamp = nowIso();
+
+  const productRows = current.products.map((product) => ({
+    id: product.id,
+    data: product,
+    source: product.source || "custom",
+    updated_at: product.updatedAt || timestamp,
+  }));
+  await supabaseDeleteMissing("shora_products", "id", productRows.map((row) => row.id));
+  await supabaseUpsert("shora_products?on_conflict=id", productRows);
+
+  const inventoryRows = Object.entries(current.inventory || {}).map(([productId, stock]) => ({
+    product_id: productId,
+    stock: Math.max(0, Math.round(Number(stock || 0))),
+    updated_at: timestamp,
+  }));
+  await supabaseDeleteMissing("shora_inventory", "product_id", inventoryRows.map((row) => row.product_id));
+  await supabaseUpsert("shora_inventory?on_conflict=product_id", inventoryRows);
+
+  const deletedRows = (current.deletedProductIds || []).map((productId) => ({ product_id: String(productId) }));
+  await supabaseDeleteMissing("shora_deleted_products", "product_id", deletedRows.map((row) => row.product_id));
+  await supabaseUpsert("shora_deleted_products?on_conflict=product_id", deletedRows);
+
+  await supabaseUpsert(
+    "shora_wallets?on_conflict=user_id",
+    Object.values(current.wallets || {}).map((wallet) => ({
+      user_id: String(wallet.userId),
+      data: wallet,
+      balance_satang: Number(wallet.balanceSatang || 0),
+      currency: wallet.currency || "THB",
+      created_at: wallet.createdAt || timestamp,
+      updated_at: wallet.updatedAt || timestamp,
+    })),
+  );
+
+  await supabaseUpsert(
+    "shora_topups?on_conflict=id",
+    current.topups.map((topup) => ({
+      id: topup.id,
+      user_id: topup.userId || null,
+      voucher_hash: topup.voucherHash || null,
+      status: topup.status || "",
+      amount_satang: Number(topup.amountSatang || 0),
+      data: topup,
+      created_at: topup.createdAt || timestamp,
+    })),
+  );
+
+  await supabaseUpsert(
+    "shora_orders?on_conflict=id",
+    current.orders.map((order) => ({
+      id: order.id,
+      user_id: order.userId || null,
+      contact: order.contact || null,
+      status: order.status || "",
+      amount_satang: Number(order.amountSatang || amountToSatang(order.amount || 0)),
+      license_key: order.licenseKey || null,
+      data: order,
+      created_at: order.createdAt || timestamp,
+    })),
+  );
+
+  await supabaseUpsert(
+    "shora_license_keys?on_conflict=license_key",
+    current.keys.map((license) => ({
+      license_key: license.key,
+      contact: license.contact || null,
+      status: effectiveStatus(license),
+      data: license,
+      created_at: license.createdAt || timestamp,
+      updated_at: license.updatedAt || timestamp,
+    })),
+  );
+}
+
+async function saveBackendStore(store) {
+  saveStore(store);
+  if (!supabaseConfigured()) return;
+
+  try {
+    await saveStoreToSupabase(store);
+  } catch (error) {
+    console.warn(`Supabase store write failed, local backup saved: ${error.message}`);
+    throw error;
+  }
+}
+
 function postgrestValue(value) {
   return encodeURIComponent(String(value ?? ""));
 }
@@ -1835,7 +2009,7 @@ async function handleScriptLoaderTool(req, res) {
   if (!session) return;
 
   const body = await readBody(req);
-  const store = readStore();
+  const store = await readBackendStore();
   const record = await findUserScriptLicense(body.key, session.user.id, store);
 
   if (record?.error) {
@@ -1865,7 +2039,7 @@ async function handleScriptResetDevice(req, res) {
   if (!session) return;
 
   const body = await readBody(req);
-  const store = readStore();
+  const store = await readBackendStore();
   const record = await findUserScriptLicense(body.key, session.user.id, store);
 
   if (record?.error) {
@@ -1914,7 +2088,7 @@ async function handleScriptResetDevice(req, res) {
     if (!Array.isArray(record.license.activations)) record.license.activations = [];
     record.license.activations = [];
     record.license.updatedAt = nowIso();
-    saveStore(store);
+    await saveBackendStore(store);
     updatedRecord = {
       ...record,
       publicLicense: publicLocalScriptLicense(record.license),
@@ -1969,8 +2143,9 @@ async function handleApi(req, res, url) {
     if (req.method === "GET" && pathname === "/api/wallet") {
       const session = requireSession(req, res);
       if (!session) return;
-      const store = readStore();
+      const store = await readBackendStore();
       const wallet = walletForUser(store, session.user);
+      await saveBackendStore(store);
       sendJson(res, 200, {
         ok: true,
         wallet: publicWallet(wallet),
@@ -1982,7 +2157,7 @@ async function handleApi(req, res, url) {
     if (req.method === "GET" && pathname === "/api/topups") {
       const session = requireSession(req, res);
       if (!session) return;
-      const store = readStore();
+      const store = await readBackendStore();
       const topups = store.topups
         .filter((topup) => topup.userId === session.user.id)
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -1996,7 +2171,7 @@ async function handleApi(req, res, url) {
       const session = requireSession(req, res);
       if (!session) return;
 
-      const store = readStore();
+      const store = await readBackendStore();
       const userId = String(session.user.id);
       const orders = store.orders
         .filter((order) => order.userId === userId || order.contact === `discord:${userId}`)
@@ -2047,7 +2222,7 @@ async function handleApi(req, res, url) {
         return;
       }
 
-      let store = readStore();
+      let store = await readBackendStore();
       const usedTopup = store.topups.find((topup) => topup.voucherHash === voucherHash && topup.status === "success");
       if (usedTopup) {
         sendJson(res, 409, { ok: false, error: "ซองอั่งเปานี้ถูกใช้เติมเงินในระบบแล้ว" });
@@ -2057,7 +2232,7 @@ async function handleApi(req, res, url) {
       topupLocks.add(voucherHash);
       try {
         const redeemed = await redeemTrueMoneyVoucher(voucherHash);
-        store = readStore();
+        store = await readBackendStore();
 
         const duplicateAfterRedeem = store.topups.find((topup) => topup.voucherHash === voucherHash && topup.status === "success");
         if (duplicateAfterRedeem) {
@@ -2087,7 +2262,7 @@ async function handleApi(req, res, url) {
         };
 
         store.topups.push(topup);
-        saveStore(store);
+        await saveBackendStore(store);
 
         sendJson(res, 201, {
           ok: true,
@@ -2095,7 +2270,7 @@ async function handleApi(req, res, url) {
           wallet: publicWallet(wallet),
         });
       } catch (error) {
-        store = readStore();
+        store = await readBackendStore();
         store.topups.push({
           id: generateId("topup_failed"),
           provider: "truemoney_angpao",
@@ -2109,7 +2284,7 @@ async function handleApi(req, res, url) {
           displayName: session.user.global_name || session.user.username || "Discord",
           createdAt: nowIso(),
         });
-        saveStore(store);
+        await saveBackendStore(store);
         sendJson(res, 400, { ok: false, error: error.message || "เติมเงินไม่สำเร็จ" });
       } finally {
         topupLocks.delete(voucherHash);
@@ -2123,20 +2298,20 @@ async function handleApi(req, res, url) {
     }
 
     if (req.method === "GET" && pathname === "/api/catalog") {
-      const catalog = catalogForStore(readStore());
+      const catalog = catalogForStore(await readBackendStore());
       sendJson(res, 200, { ok: true, categories: catalog.categories, products: catalog.products });
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/categories") {
-      sendJson(res, 200, { ok: true, categories: catalogForStore(readStore()).categories });
+      sendJson(res, 200, { ok: true, categories: catalogForStore(await readBackendStore()).categories });
       return;
     }
 
     const categoryProductsMatch = pathname.match(/^\/api\/categories\/([^/]+)\/products$/);
     if (req.method === "GET" && categoryProductsMatch) {
       const slug = decodeURIComponent(categoryProductsMatch[1]);
-      const catalog = catalogForStore(readStore());
+      const catalog = catalogForStore(await readBackendStore());
       const category = catalog.categories.find((item) => item.slug === slug);
       if (!category) {
         sendJson(res, 404, { ok: false, error: "Category not found" });
@@ -2151,7 +2326,7 @@ async function handleApi(req, res, url) {
     if (req.method === "POST" && pathname === "/api/keys/verify") {
       const body = await readBody(req);
       const key = normalizeKey(body.key);
-      const store = readStore();
+      const store = await readBackendStore();
       const license = store.keys.find((item) => item.key === key);
 
       if (!license) {
@@ -2168,7 +2343,7 @@ async function handleApi(req, res, url) {
       if (!session) return;
 
       const body = await readBody(req);
-      const store = readStore();
+      const store = await readBackendStore();
       const product = findProduct(body.productId, store);
       const plan = product ? offerFromProduct(product, store) : findPlan(body.planId);
 
@@ -2236,7 +2411,7 @@ async function handleApi(req, res, url) {
         store.inventory[product.id] = Math.max(0, Number(product.stock || 0) - 1);
       }
       await createScriptLicenseForCheckout(license, order, session.user);
-      saveStore(store);
+      await saveBackendStore(store);
 
       sendJson(res, 201, {
         ok: true,
@@ -2266,7 +2441,7 @@ async function handleApi(req, res, url) {
 }
 
 async function handleAdminApi(req, res, pathname) {
-  const store = readStore();
+  const store = await readBackendStore();
 
   if (req.method === "GET" && pathname === "/api/admin/summary") {
     sendJson(res, 200, { ok: true, summary: summarize(store) });
@@ -2290,7 +2465,7 @@ async function handleAdminApi(req, res, pathname) {
     const product = normalizeAdminProduct(body, null, usedIds);
     store.products.push(product);
     store.inventory[product.id] = product.stock;
-    saveStore(store);
+    await saveBackendStore(store);
     sendJson(res, 201, { ok: true, product: adminProduct(product, store), categories: catalogForStore(store).categories });
     return;
   }
@@ -2317,7 +2492,7 @@ async function handleAdminApi(req, res, pathname) {
       }
 
       store.deletedProductIds = [...deletedIds];
-      saveStore(store);
+      await saveBackendStore(store);
       sendJson(res, 200, { ok: true, product: adminProduct(defaultProduct, store, "default"), categories: catalogForStore(store).categories });
       return;
     }
@@ -2337,7 +2512,7 @@ async function handleAdminApi(req, res, pathname) {
       store.inventory[store.products[index].id] = store.products[index].stock;
     }
 
-    saveStore(store);
+    await saveBackendStore(store);
     sendJson(res, 200, { ok: true, product: adminProduct(store.products[index], store), categories: catalogForStore(store).categories });
     return;
   }
@@ -2349,7 +2524,7 @@ async function handleAdminApi(req, res, pathname) {
       const deletedIds = deletedProductSet(store);
       deletedIds.add(productId);
       store.deletedProductIds = [...deletedIds];
-      saveStore(store);
+      await saveBackendStore(store);
       sendJson(res, 200, { ok: true, product: adminProduct(defaultProduct, store, "default"), categories: catalogForStore(store).categories });
       return;
     }
@@ -2362,7 +2537,7 @@ async function handleAdminApi(req, res, pathname) {
 
     const [removed] = store.products.splice(index, 1);
     delete store.inventory[productId];
-    saveStore(store);
+    await saveBackendStore(store);
     sendJson(res, 200, { ok: true, product: adminProduct(removed, store), categories: catalogForStore(store).categories });
     return;
   }
@@ -2447,7 +2622,7 @@ async function handleAdminApi(req, res, pathname) {
     }
 
     const localLicense = createLocalScriptLicenseForAdmin(store, body);
-    saveStore(store);
+    await saveBackendStore(store);
     sendJson(res, 201, {
       ok: true,
       license: publicLocalScriptLicense(localLicense),
@@ -2508,7 +2683,7 @@ async function handleAdminApi(req, res, pathname) {
     if (nextStatus) localLicense.status = nextStatus;
     if (body.resetHwid === true) localLicense.activations = [];
     localLicense.updatedAt = nowIso();
-    saveStore(store);
+    await saveBackendStore(store);
     sendJson(res, 200, { ok: true, license: publicLocalScriptLicense(localLicense), backend: "local" });
     return;
   }
@@ -2571,7 +2746,7 @@ async function handleAdminApi(req, res, pathname) {
 
     store.orders.push(order);
     const license = createLicense(store, plan, order, String(body.note || "Issued by admin"));
-    saveStore(store);
+    await saveBackendStore(store);
     sendJson(res, 201, { ok: true, license: adminLicense(license), order });
     return;
   }
@@ -2596,7 +2771,7 @@ async function handleAdminApi(req, res, pathname) {
     license.status = nextStatus;
     license.note = String(body.note || license.note || "");
     license.updatedAt = nowIso();
-    saveStore(store);
+    await saveBackendStore(store);
     sendJson(res, 200, { ok: true, license: adminLicense(license) });
     return;
   }
