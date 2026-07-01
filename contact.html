@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ติดต่อ - Shora Hub</title>
+    <meta name="description" content="Contact Shora Hub support." />
+    <link rel="icon" type="image/png" href="/assets/site-logo.png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="contact">
+    <header class="app-header">
+      <a class="brand" href="/">
+        <span class="brand-mark"><img src="/assets/site-logo.png" alt="" /></span>
+        <span>Shora Hub</span>
+      </a>
+      <a class="login-button" id="loginButton" data-provider="discord" href="/auth/discord">เข้าสู่ระบบ</a>
+    </header>
+
+    <main class="app-main">
+      <p class="page-kicker reveal">ติดต่อ</p>
+      <section class="glass-panel reveal">
+        <div class="section-head">
+          <span class="section-icon">⌁</span>
+          <div>
+            <p class="eyebrow">Support</p>
+            <h1>ช่องทางติดต่อ</h1>
+          </div>
+        </div>
+        <div class="contact-list">
+          <a href="#" data-toast="ใส่ลิงก์ Discord จริงใน contact.html">Discord Support</a>
+          <a href="#" data-toast="ใส่ลิงก์ Telegram จริงใน contact.html">Telegram</a>
+          <a href="mailto:support@example.com">support@example.com</a>
+        </div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Bottom navigation">
+      <a href="/" data-nav="home"><span>⌂</span>หน้าหลัก</a>
+      <a href="/category" data-nav="category"><span>▣</span>สินค้า</a>
+      <a href="/tools" data-nav="tools"><span>⌘</span>เครื่องมือ</a>
+      <a href="/topup" data-nav="topup"><span>▤</span>เติมเงิน</a>
+      <a href="/guide" data-nav="guide"><span>□</span>คู่มือการใช้งาน</a>
+      <a href="/contact" data-nav="contact"><span>⌁</span>ติดต่อ</a>
+    </nav>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/script.js"></script>
+  </body>
+</html>

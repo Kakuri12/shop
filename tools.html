@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>เครื่องมือ - Shora Hub</title>
+    <meta name="description" content="Check licenses and access customer tools." />
+    <link rel="icon" type="image/png" href="/assets/site-logo.png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="tools">
+    <header class="app-header">
+      <a class="brand" href="/">
+        <span class="brand-mark"><img src="/assets/site-logo.png" alt="" /></span>
+        <span>Shora Hub</span>
+      </a>
+      <a class="login-button" id="loginButton" data-provider="discord" href="/auth/discord">เข้าสู่ระบบ</a>
+    </header>
+
+    <main class="app-main">
+      <p class="page-kicker reveal">เครื่องมือ</p>
+      <section class="glass-panel reveal">
+        <div class="section-head">
+          <span class="section-icon">⌘</span>
+          <div>
+            <p class="eyebrow">License Center</p>
+            <h1>ตรวจสอบ License Key</h1>
+          </div>
+        </div>
+        <form class="key-form" id="keyForm">
+          <label for="licenseKey">กรอกคีย์ของคุณ</label>
+          <div class="input-row">
+            <input id="licenseKey" name="licenseKey" type="text" placeholder="XK-DEMO-2026" autocomplete="off" required />
+            <button class="button button-primary" type="submit">ตรวจ</button>
+          </div>
+          <div class="key-result" id="keyResult" role="status" aria-live="polite">
+            <span>?</span>
+            <div>
+              <strong>พร้อมตรวจสอบคีย์</strong>
+              <p>ลองใช้ XK-DEMO-2026 หรือคีย์ที่ซื้อจากระบบ</p>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section class="tool-grid">
+        <article class="tool-card reveal">
+          <span class="tool-icon">⇩</span>
+          <h2>Download Launcher</h2>
+          <p>พื้นที่สำหรับวางลิงก์ดาวน์โหลด launcher หรือไฟล์ติดตั้ง</p>
+          <button class="button button-glass" type="button" data-toast="ยังไม่ได้ตั้งค่าลิงก์ดาวน์โหลด">Download</button>
+        </article>
+        <article class="tool-card reveal">
+          <span class="tool-icon">↻</span>
+          <h2>Reset Device</h2>
+          <p>เตรียมไว้สำหรับระบบ reset HWID / device binding</p>
+          <button class="button button-glass" type="button" data-toast="ฟีเจอร์นี้รอต่อ backend เพิ่ม">Request reset</button>
+        </article>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Bottom navigation">
+      <a href="/" data-nav="home"><span>⌂</span>หน้าหลัก</a>
+      <a href="/category" data-nav="category"><span>▣</span>สินค้า</a>
+      <a href="/tools" data-nav="tools"><span>⌘</span>เครื่องมือ</a>
+      <a href="/topup" data-nav="topup"><span>▤</span>เติมเงิน</a>
+      <a href="/guide" data-nav="guide"><span>□</span>คู่มือการใช้งาน</a>
+      <a href="/contact" data-nav="contact"><span>⌁</span>ติดต่อ</a>
+    </nav>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/script.js"></script>
+  </body>
+</html>

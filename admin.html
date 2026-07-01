@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shora Hub Admin</title>
+    <meta name="description" content="Admin panel for Shora Hub store and license management." />
+    <link rel="icon" type="image/png" href="/assets/site-logo.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav shell" aria-label="Admin navigation">
+        <a class="brand" href="/">
+          <span class="brand-mark"><img src="/assets/site-logo.png" alt="" /></span>
+          <span>Shora Hub Admin</span>
+        </a>
+        <div class="nav-links">
+          <a href="/">Storefront</a>
+          <a href="/admin.html">Admin</a>
+        </div>
+      </nav>
+    </header>
+
+    <main class="admin-main shell">
+      <section class="admin-hero">
+        <div>
+          <p class="eyebrow">Shora operations</p>
+          <h1>Admin dashboard</h1>
+          <p>จัดการสินค้า ออเดอร์ คีย์ และ source script จากที่เดียวแบบเป็นหมวดหมู่</p>
+        </div>
+        <div class="admin-hero-actions">
+          <a class="button button-secondary" href="/">Storefront</a>
+          <a class="button button-primary" href="/category">ดูหน้าสินค้า</a>
+        </div>
+      </section>
+
+      <section class="admin-access-card">
+        <div>
+          <strong>Admin token</strong>
+          <span>ใช้ค่า <code>ADMIN_TOKEN</code> จากไฟล์ .env เพื่อปลดล็อกหลังบ้าน</span>
+        </div>
+        <div class="admin-toolbar" aria-label="Admin token">
+          <input id="adminToken" type="password" placeholder="Admin token" />
+          <button class="button button-primary" id="saveToken" type="button">Load dashboard</button>
+          <button class="button button-secondary" id="refreshAdmin" type="button">Refresh</button>
+        </div>
+      </section>
+
+      <p class="status-text" id="adminStatus">Enter admin token to load dashboard.</p>
+
+      <section class="metric-grid" id="metricGrid" aria-label="Summary metrics"></section>
+
+      <section class="admin-tabs" role="tablist" aria-label="Admin sections">
+        <button class="active" type="button" data-admin-tab="overview">ภาพรวม</button>
+        <button type="button" data-admin-tab="products">สินค้า</button>
+        <button type="button" data-admin-tab="orders">ออเดอร์ / คีย์</button>
+        <button type="button" data-admin-tab="scripts">สคริปต์</button>
+      </section>
+
+      <section class="admin-panel active" data-admin-panel="overview">
+        <article class="admin-card">
+          <div class="admin-card-head">
+            <div>
+              <p class="eyebrow">Quick start</p>
+              <h3>งานที่ใช้บ่อย</h3>
+            </div>
+          </div>
+          <div class="admin-quick-grid">
+            <button class="admin-quick-card" type="button" data-jump-tab="products">
+              <strong>เพิ่มสินค้า</strong>
+              <span>สร้างสินค้าใหม่ ใส่รูป ราคา วันใช้งาน แล้วขึ้นหน้าเว็บทันที</span>
+            </button>
+            <button class="admin-quick-card" type="button" data-jump-tab="orders">
+              <strong>ดูออเดอร์</strong>
+              <span>เช็กคำสั่งซื้อ คีย์ที่ออก และสถานะคีย์ของลูกค้า</span>
+            </button>
+            <button class="admin-quick-card" type="button" data-jump-tab="scripts">
+              <strong>แก้ source script</strong>
+              <span>วาง Lua source ที่จะถูกส่งหลัง key/HWID ผ่าน</span>
+            </button>
+          </div>
+        </article>
+      </section>
+
+      <section class="admin-panel" data-admin-panel="products" hidden>
+        <div class="admin-section-grid admin-products-stack">
+          <article class="admin-card admin-card-wide">
+            <div class="admin-card-head">
+              <div>
+                <p class="eyebrow">Catalog</p>
+                <h3>เพิ่มสินค้า</h3>
+              </div>
+            </div>
+            <form class="admin-form admin-product-form" id="productForm">
+              <label class="form-field">
+                <span>หมวดหมู่</span>
+                <select name="categorySlug" id="productCategory">
+                  <option value="xenon-hub-v1">Shora Hub V1</option>
+                  <option value="storm-launcher-pc">Storm Launcher (PC)</option>
+                  <option value="premium-scripts">Premium Scripts</option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span>ชื่อสินค้า</span>
+                <input name="name" type="text" placeholder="Shora Hub V2 - Daily" required />
+              </label>
+              <label class="form-field">
+                <span>Product ID (ไม่ใส่ก็ได้)</span>
+                <input name="id" type="text" placeholder="auto-from-name" />
+              </label>
+              <div class="admin-form-pair">
+                <label class="form-field">
+                  <span>ป้าย</span>
+                  <input name="badge" type="text" placeholder="24H / HOT / VIP" />
+                </label>
+                <label class="form-field">
+                  <span>ราคา</span>
+                  <input name="price" type="number" min="0" step="1" value="99" required />
+                </label>
+              </div>
+              <div class="admin-form-pair">
+                <label class="form-field">
+                  <span>วันใช้งาน</span>
+                  <input name="durationDays" type="number" min="0" placeholder="30, เว้นว่าง = ถาวร" />
+                </label>
+                <label class="form-field">
+                  <span>จำนวนเครื่อง</span>
+                  <input name="devicesLimit" type="number" min="1" max="10" value="1" />
+                </label>
+              </div>
+              <label class="form-field">
+                <span>จำนวนสินค้า</span>
+                <input name="stock" type="number" min="0" step="1" value="35" />
+              </label>
+              <label class="form-field form-field-wide">
+                <span>รูปสินค้า</span>
+                <input name="image" type="text" placeholder="/assets/xenon-hub-v1.png" />
+              </label>
+              <label class="form-field form-field-wide">
+                <span>รายละเอียดสินค้า</span>
+                <textarea name="features" placeholder="รับคีย์ทันที&#10;ใช้งาน 30 วัน&#10;รองรับมือถือ"></textarea>
+              </label>
+              <button class="button button-primary" type="submit">เพิ่มสินค้า</button>
+            </form>
+          </article>
+
+          <article class="admin-card admin-card-wide">
+            <div class="admin-card-head">
+              <div>
+                <p class="eyebrow">Products</p>
+                <h3>สินค้าทั้งหมด</h3>
+              </div>
+              <span class="admin-count" id="productCount">0</span>
+            </div>
+            <p class="source-help">ลบสินค้า default ออกจากหน้าร้านได้ และกด Restore เพื่อเอากลับมาได้ภายหลัง</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Category</th>
+                    <th>Price</th>
+                    <th>Stock</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="productsTable">
+                  <tr><td colspan="6" class="empty-state">No custom products loaded.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" data-admin-panel="orders" hidden>
+        <div class="admin-section-grid">
+          <article class="admin-card">
+            <div class="admin-card-head">
+              <div>
+                <p class="eyebrow">Manual issue</p>
+                <h3>สร้างคีย์เอง</h3>
+              </div>
+            </div>
+            <form class="admin-form" id="createKeyForm">
+              <label class="form-field">
+                <span>Plan</span>
+                <select name="planId">
+                  <option value="daily">Daily - ฿99</option>
+                  <option value="monthly" selected>Monthly Pro - ฿499</option>
+                  <option value="lifetime">Lifetime - ฿1,990</option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span>ชื่อลูกค้า</span>
+                <input name="customerName" type="text" placeholder="Customer name" required />
+              </label>
+              <label class="form-field">
+                <span>Email หรือ Discord</span>
+                <input name="contact" type="text" placeholder="name@example.com / @discord" />
+              </label>
+              <label class="form-field">
+                <span>Note</span>
+                <textarea name="note" placeholder="Payment reference, Discord ID, or internal note"></textarea>
+              </label>
+              <button class="button button-primary" type="submit">Generate key</button>
+            </form>
+          </article>
+
+          <article class="admin-card">
+            <div class="admin-card-head">
+              <div>
+                <p class="eyebrow">License keys</p>
+                <h3>คีย์สินค้า</h3>
+              </div>
+              <span class="admin-count" id="keyCount">0</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Key</th>
+                    <th>Plan</th>
+                    <th>Status</th>
+                    <th>Customer</th>
+                    <th>Expires</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="keysTable">
+                  <tr><td colspan="6" class="empty-state">No data loaded.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="admin-card admin-card-wide">
+            <div class="admin-card-head">
+              <div>
+                <p class="eyebrow">Orders</p>
+                <h3>ประวัติคำสั่งซื้อ</h3>
+              </div>
+              <span class="admin-count" id="orderCount">0</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Order</th>
+                    <th>Product</th>
+                    <th>Customer</th>
+                    <th>Amount</th>
+                    <th>Key</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+                <tbody id="ordersTable">
+                  <tr><td colspan="6" class="empty-state">No orders loaded.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="admin-panel" data-admin-panel="scripts" hidden>
+        <div class="admin-section-grid">
+          <article class="admin-card">
+            <div class="admin-card-head">
+              <div>
+                <p class="eyebrow">Script key</p>
+                <h3>สร้าง script key</h3>
+              </div>
+            </div>
+            <form class="admin-form" id="scriptKeyForm">
+              <label class="form-field">
+                <span>Discord ID</span>
+                <input name="discordId" type="text" inputmode="numeric" placeholder="1021433794705768518" required />
+              </label>
+              <label class="form-field">
+                <span>Product</span>
+                <input name="productId" type="text" value="shora-hub-v1" />
+              </label>
+              <div class="admin-form-pair">
+                <label class="form-field">
+                  <span>Duration days</span>
+                  <input name="durationDays" type="number" min="0" value="30" />
+                </label>
+                <label class="form-field">
+                  <span>Max devices</span>
+                  <input name="maxDevices" type="number" min="1" max="10" value="1" />
+                </label>
+              </div>
+              <label class="form-field">
+                <span>Note</span>
+                <textarea name="note" placeholder="Order ID, payment reference, or internal note"></textarea>
+              </label>
+              <button class="button button-primary" type="submit">Generate script key</button>
+            </form>
+            <div class="loader-preview" id="scriptLoaderPreview" hidden>
+              <span>Loader snippet</span>
+              <pre><code id="scriptLoaderCode"></code></pre>
+              <button class="button button-small button-secondary" type="button" id="copyScriptLoader">Copy loader</button>
+            </div>
+          </article>
+
+          <article class="admin-card">
+            <div class="admin-card-head">
+              <div>
+                <p class="eyebrow">Source</p>
+                <h3>Script source</h3>
+              </div>
+            </div>
+            <p class="source-help" id="scriptSourceMeta">Source is served only after key and HWID pass.</p>
+            <form class="admin-form" id="scriptSourceForm">
+              <label class="form-field">
+                <span>Lua source</span>
+                <textarea class="source-editor" id="scriptSourceEditor" name="source" spellcheck="false" placeholder='print("Shora source loaded")'></textarea>
+              </label>
+              <div class="source-actions">
+                <button class="button button-primary" type="submit">Save source</button>
+                <button class="button button-secondary" type="button" id="reloadScriptSource">Reload</button>
+              </div>
+            </form>
+          </article>
+
+          <article class="admin-card admin-card-wide">
+            <div class="admin-card-head">
+              <div>
+                <p class="eyebrow">Script licenses</p>
+                <h3>Script keys</h3>
+              </div>
+              <span class="admin-count" id="scriptKeyCount">0</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Key</th>
+                    <th>Discord</th>
+                    <th>Status</th>
+                    <th>HWID</th>
+                    <th>Expires</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="scriptKeysTable">
+                  <tr><td colspan="6" class="empty-state">No script keys loaded.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="admin.js"></script>
+  </body>
+</html>

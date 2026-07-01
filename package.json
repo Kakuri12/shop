@@ -1,0 +1,14 @@
+{
+  "name": "shorakey-store",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Premium storefront and license key system for selling pro access.",
+  "scripts": {
+    "build:netlify": "node scripts/prepare-netlify.js",
+    "start": "node server.js",
+    "check": "node --check server.js && node --check script.js && node --check admin.js && node --check scripts/prepare-netlify.js && node --check netlify/functions/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

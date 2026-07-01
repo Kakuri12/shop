@@ -1,0 +1,7 @@
+.env
+.git/
+.netlify/
+data/store.json
+tmp/
+*.log
+node_modules/

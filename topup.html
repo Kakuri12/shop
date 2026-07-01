@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>เติมเงิน - Shora Hub</title>
+    <meta name="description" content="Top up wallet and payment methods." />
+    <link rel="icon" type="image/png" href="/assets/site-logo.png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="topup">
+    <header class="app-header">
+      <a class="brand" href="/">
+        <span class="brand-mark"><img src="/assets/site-logo.png" alt="" /></span>
+        <span>Shora Hub</span>
+      </a>
+      <a class="login-button" id="loginButton" data-provider="discord" href="/auth/discord">เข้าสู่ระบบ</a>
+    </header>
+
+    <main class="app-main topup-main">
+      <p class="page-kicker topup-kicker reveal">เติมเงิน</p>
+      <section class="topup-panel glass-panel reveal">
+        <div class="member-lock" id="topupLock" hidden>
+          <span class="lock-icon" aria-hidden="true">▣</span>
+          <h1>หน้านี้สำหรับสมาชิก</h1>
+          <p>เข้าสู่ระบบเพื่อเติมเงินด้วยซองอั่งเปา TrueMoney และผูกยอดเงินกับบัญชี Discord ของคุณ</p>
+          <a class="login-button lock-login" href="/auth/discord" data-provider="discord">เข้าสู่ระบบด้วย Discord</a>
+        </div>
+
+        <div class="topup-content" id="topupContent" hidden>
+          <div class="topup-title">
+            <span class="coin-icon" aria-hidden="true">$</span>
+            <div>
+              <h1>เติมเงิน</h1>
+              <p>ยอดเงินคงเหลือ <strong id="walletBalance">฿0.00</strong></p>
+            </div>
+          </div>
+
+          <a class="topup-video" href="/guide" aria-label="ดูวิธีเติมเงิน">
+            <img src="/assets/xenon-hub-v1.png" alt="วิธีเติมเงิน Shora Hub" />
+            <span class="video-brand">
+              <img src="/assets/site-logo.png" alt="" />
+              <span>Shora Hub</span>
+            </span>
+            <span class="play-button" aria-hidden="true">▶</span>
+            <span class="watch-label">Watch on YouTube</span>
+          </a>
+
+          <form class="topup-form" id="angpaoForm">
+            <label class="form-field">
+              <span>ลิงก์ซอง</span>
+              <input
+                id="angpaoUrl"
+                name="voucherUrl"
+                type="url"
+                inputmode="url"
+                placeholder="https://gift.truemoney.com/campaign/?v=xxxxxxxxxxxx"
+                autocomplete="off"
+                required
+              />
+            </label>
+            <label class="accept-row">
+              <input id="acceptTopupTerms" type="checkbox" />
+              <span>ยอมรับ <a href="/terms" target="_blank" rel="noreferrer">ข้อกำหนดในการให้บริการ</a></span>
+            </label>
+            <button class="button button-primary topup-submit" id="topupSubmit" type="submit" disabled>ยืนยัน</button>
+            <div class="checkout-result" id="topupResult" role="status" aria-live="polite"></div>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Bottom navigation">
+      <a href="/" data-nav="home"><span>⌂</span>หน้าหลัก</a>
+      <a href="/category" data-nav="category"><span>▣</span>สินค้า</a>
+      <a href="/tools" data-nav="tools"><span>⌘</span>เครื่องมือ</a>
+      <a href="/topup" data-nav="topup"><span>▤</span>เติมเงิน</a>
+      <a href="/guide" data-nav="guide"><span>□</span>คู่มือการใช้งาน</a>
+      <a href="/contact" data-nav="contact"><span>⌁</span>ติดต่อ</a>
+    </nav>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/script.js"></script>
+  </body>
+</html>
