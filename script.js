@@ -102,13 +102,32 @@ async function apiJson(url, options = {}) {
   return data;
 }
 
+function withComputedCategoryCounts(catalog) {
+  const products = Array.isArray(catalog?.products) ? catalog.products : [];
+  const categories = Array.isArray(catalog?.categories) ? catalog.categories : [];
+  const counts = products.reduce((acc, product) => {
+    if (!product?.categorySlug) return acc;
+    acc[product.categorySlug] = (acc[product.categorySlug] || 0) + 1;
+    return acc;
+  }, {});
+
+  return {
+    ...catalog,
+    categories: categories.map((category) => ({
+      ...category,
+      itemCount: counts[category.slug] || 0,
+    })),
+    products,
+  };
+}
+
 async function getCatalog() {
   if (catalogCache) return catalogCache;
 
   try {
-    catalogCache = await apiJson("/api/catalog");
+    catalogCache = withComputedCategoryCounts(await apiJson("/api/catalog"));
   } catch {
-    catalogCache = { ok: true, ...fallbackCatalog };
+    catalogCache = withComputedCategoryCounts({ ok: true, ...fallbackCatalog });
   }
 
   return catalogCache;
