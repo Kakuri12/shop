@@ -994,7 +994,7 @@ function publicToolLog(log) {
 function requireSession(req, res) {
   const session = sessionFromRequest(req);
   if (session) return session;
-  sendJson(res, 401, { ok: false, error: "กรุณาเข้าสู่ระบบด้วย Discord ก่อนเติมเงิน" });
+  sendJson(res, 401, { ok: false, error: "กรุณาเข้าสู่ระบบด้วย Discord ก่อนใช้งาน" });
   return null;
 }
 
@@ -1729,6 +1729,73 @@ function verifyLocalScriptAccess(req, url, body = {}) {
   };
 }
 
+function localScriptLicenseForUser(store, key, discordId) {
+  return store.keys.find((license) => {
+    const contact = String(license.contact || "");
+    return license.key === key && contact === `discord:${discordId}`;
+  });
+}
+
+function scriptLicenseUnavailableMessage(license) {
+  if (!license) return "ไม่พบคีย์นี้ในบัญชี Discord ของคุณ";
+  if (license.status === "expired") return "คีย์นี้หมดอายุแล้ว";
+  if (license.status !== "active") return "คีย์นี้ยังไม่พร้อมใช้งาน";
+  return "";
+}
+
+async function findUserScriptLicense(key, discordId, store = readStore()) {
+  const normalizedKey = normalizeKey(key);
+  const normalizedDiscordId = normalizeDiscordId(discordId);
+
+  if (!normalizedKey || normalizedKey.length < 12) {
+    return { error: { status: 400, message: "กรุณากรอก License Key ให้ถูกต้อง" } };
+  }
+
+  if (!normalizedDiscordId) {
+    return { error: { status: 400, message: "ไม่พบ Discord ID ของผู้ใช้" } };
+  }
+
+  if (supabaseConfigured()) {
+    try {
+      const rows = await supabaseRequest(scriptLicenseSelect(normalizedKey, normalizedDiscordId));
+      const license = Array.isArray(rows) ? rows[0] : null;
+      if (license) {
+        return {
+          backend: "supabase",
+          key: normalizedKey,
+          discordId: normalizedDiscordId,
+          license,
+          publicLicense: publicScriptLicense(license),
+        };
+      }
+    } catch (error) {
+      console.warn(`User script license Supabase lookup failed, using local fallback: ${error.message}`);
+    }
+  }
+
+  const localLicense = localScriptLicenseForUser(store, normalizedKey, normalizedDiscordId);
+  if (!localLicense) return null;
+
+  return {
+    backend: "local",
+    key: normalizedKey,
+    discordId: normalizedDiscordId,
+    license: localLicense,
+    publicLicense: publicLocalScriptLicense(localLicense),
+  };
+}
+
+function scriptToolPayload(record, req) {
+  return {
+    license: record.publicLicense,
+    script: {
+      loader: buildScriptLoaderSnippet(record.key, record.discordId, req),
+      loaderUrl: `${publicBaseUrl(req)}/loader.lua`,
+      backend: record.backend,
+    },
+  };
+}
+
 async function handleScriptAuth(req, res, url) {
   const body = req.method === "POST" ? await readBody(req) : {};
   const access = await verifyScriptAccess(req, url, body);
@@ -1763,6 +1830,104 @@ async function handleScriptSource(req, res, url) {
   sendLua(res, 200, source.source);
 }
 
+async function handleScriptLoaderTool(req, res) {
+  const session = requireSession(req, res);
+  if (!session) return;
+
+  const body = await readBody(req);
+  const store = readStore();
+  const record = await findUserScriptLicense(body.key, session.user.id, store);
+
+  if (record?.error) {
+    sendJson(res, record.error.status, { ok: false, error: record.error.message });
+    return;
+  }
+
+  if (!record) {
+    sendJson(res, 404, { ok: false, error: "ไม่พบคีย์นี้ในบัญชี Discord ของคุณ" });
+    return;
+  }
+
+  const unavailableMessage = scriptLicenseUnavailableMessage(record.publicLicense);
+  if (unavailableMessage) {
+    sendJson(res, 403, { ok: false, error: unavailableMessage, license: record.publicLicense });
+    return;
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    ...scriptToolPayload(record, req),
+  });
+}
+
+async function handleScriptResetDevice(req, res) {
+  const session = requireSession(req, res);
+  if (!session) return;
+
+  const body = await readBody(req);
+  const store = readStore();
+  const record = await findUserScriptLicense(body.key, session.user.id, store);
+
+  if (record?.error) {
+    sendJson(res, record.error.status, { ok: false, error: record.error.message });
+    return;
+  }
+
+  if (!record) {
+    sendJson(res, 404, { ok: false, error: "ไม่พบคีย์นี้ในบัญชี Discord ของคุณ" });
+    return;
+  }
+
+  const unavailableMessage = scriptLicenseUnavailableMessage(record.publicLicense);
+  if (unavailableMessage) {
+    sendJson(res, 403, { ok: false, error: unavailableMessage, license: record.publicLicense });
+    return;
+  }
+
+  let updatedRecord = record;
+  if (record.backend === "supabase") {
+    const updated = await supabaseRequest(
+      `script_licenses?license_key=eq.${postgrestValue(record.key)}&discord_id=eq.${postgrestValue(record.discordId)}`,
+      {
+        method: "PATCH",
+        prefer: "return=representation",
+        body: {
+          hwid_hash: null,
+          hwid_bound_at: null,
+          updated_at: nowIso(),
+        },
+      },
+    );
+
+    const updatedLicense = Array.isArray(updated) ? updated[0] : null;
+    if (!updatedLicense) {
+      sendJson(res, 404, { ok: false, error: "ไม่พบคีย์สำหรับ Reset Device" });
+      return;
+    }
+
+    updatedRecord = {
+      ...record,
+      license: updatedLicense,
+      publicLicense: publicScriptLicense(updatedLicense),
+    };
+  } else {
+    if (!Array.isArray(record.license.activations)) record.license.activations = [];
+    record.license.activations = [];
+    record.license.updatedAt = nowIso();
+    saveStore(store);
+    updatedRecord = {
+      ...record,
+      publicLicense: publicLocalScriptLicense(record.license),
+    };
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    message: "Reset Device สำเร็จแล้ว รันสคริปต์อีกครั้งเพื่อผูกเครื่องใหม่",
+    ...scriptToolPayload(updatedRecord, req),
+  });
+}
+
 async function handleApi(req, res, url) {
   const pathname = url.pathname;
   try {
@@ -1778,6 +1943,16 @@ async function handleApi(req, res, url) {
 
     if ((req.method === "GET" || req.method === "POST") && pathname === "/api/script/source") {
       await handleScriptSource(req, res, url);
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/script/loader") {
+      await handleScriptLoaderTool(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/script/reset-device") {
+      await handleScriptResetDevice(req, res);
       return;
     }
 

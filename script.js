@@ -570,8 +570,98 @@ function setupKeyForm() {
         }
       }
       setKeyResult(isActive ? "success" : "error", isActive ? "คีย์ใช้งานได้" : "คีย์ใช้งานไม่ได้", message, isActive ? "OK" : "X", extraHtml);
+      if (isActive) {
+        document.querySelectorAll("#scriptCopyKey, #resetDeviceKey").forEach((field) => {
+          if (!field.value.trim()) field.value = key;
+        });
+      }
     } catch (error) {
       setKeyResult("error", "ไม่พบหรือเชื่อมต่อไม่ได้", error.message, "!");
+    }
+  });
+}
+
+function setToolResult(selector, type, title, message, extraHtml = "") {
+  const target = document.querySelector(selector);
+  if (!target) return;
+  target.className = `tool-result show ${type || ""}`.trim();
+  target.innerHTML = `
+    <strong>${escapeHtml(title)}</strong>
+    <p>${escapeHtml(message)}</p>
+    ${extraHtml}
+  `;
+}
+
+function loginPromptHtml() {
+  return `<a class="button button-primary tool-login-link" href="/auth/discord">เข้าสู่ระบบด้วย Discord</a>`;
+}
+
+async function requestScriptTool(endpoint, key) {
+  return apiJson(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key }),
+  });
+}
+
+function setupScriptCopyTool() {
+  const form = document.querySelector("#scriptCopyForm");
+  const input = document.querySelector("#scriptCopyKey");
+  if (!form || !input) return;
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const key = input.value.trim().toUpperCase();
+    if (!key) {
+      setToolResult("#scriptCopyResult", "error", "ยังไม่ได้กรอกคีย์", "กรุณาวาง License Key ก่อนสร้างสคริปต์");
+      return;
+    }
+
+    setToolResult("#scriptCopyResult", "", "กำลังสร้างสคริปต์", "กำลังตรวจสอบบัญชี Discord และคีย์นี้");
+
+    try {
+      const data = await requestScriptTool("/api/script/loader", key);
+      setToolResult(
+        "#scriptCopyResult",
+        "success",
+        "สร้างสคริปต์แล้ว",
+        data.license?.hwidBound ? "คีย์นี้ผูกเครื่องแล้ว ถ้าย้ายเครื่องให้ใช้ Reset Device ก่อน" : "คัดลอกสคริปต์ไปรันได้เลย ระบบจะผูก HWID ตอนรันครั้งแรก",
+        scriptSnippetBox(data.script?.loader || "", "สคริปต์สำหรับคีย์นี้"),
+      );
+    } catch (error) {
+      const needsLogin = /เข้าสู่ระบบ/.test(error.message);
+      setToolResult("#scriptCopyResult", "error", "สร้างสคริปต์ไม่สำเร็จ", error.message, needsLogin ? loginPromptHtml() : "");
+    }
+  });
+}
+
+function setupDeviceResetTool() {
+  const form = document.querySelector("#resetDeviceForm");
+  const input = document.querySelector("#resetDeviceKey");
+  if (!form || !input) return;
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const key = input.value.trim().toUpperCase();
+    if (!key) {
+      setToolResult("#resetDeviceResult", "error", "ยังไม่ได้กรอกคีย์", "กรุณาวาง License Key ก่อน Reset Device");
+      return;
+    }
+
+    setToolResult("#resetDeviceResult", "", "กำลัง Reset Device", "กำลังล้าง HWID ของคีย์นี้");
+
+    try {
+      const data = await requestScriptTool("/api/script/reset-device", key);
+      setToolResult(
+        "#resetDeviceResult",
+        "success",
+        "Reset Device สำเร็จ",
+        data.message || "ล้าง HWID แล้ว รันสคริปต์อีกครั้งเพื่อผูกเครื่องใหม่",
+        scriptSnippetBox(data.script?.loader || "", "สคริปต์หลัง Reset Device"),
+      );
+    } catch (error) {
+      const needsLogin = /เข้าสู่ระบบ/.test(error.message);
+      setToolResult("#resetDeviceResult", "error", "Reset Device ไม่สำเร็จ", error.message, needsLogin ? loginPromptHtml() : "");
     }
   });
 }
@@ -1149,6 +1239,8 @@ async function boot() {
   setupPageTransitions();
   setupDelegatedClicks();
   setupKeyForm();
+  setupScriptCopyTool();
+  setupDeviceResetTool();
   setupTopupForm();
   setupReveal();
 

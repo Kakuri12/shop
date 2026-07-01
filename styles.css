@@ -810,6 +810,70 @@ h2 {
   margin-bottom: 0;
 }
 
+.tool-mini-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.tool-mini-form input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.24);
+  color: var(--text);
+  outline: none;
+  padding: 0 13px;
+  font-weight: 800;
+}
+
+.tool-mini-form input:focus {
+  border-color: rgba(53, 217, 255, 0.52);
+  box-shadow: 0 0 0 4px rgba(53, 217, 255, 0.1);
+}
+
+.tool-result {
+  display: none;
+  gap: 8px;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 12px;
+}
+
+.tool-result.show {
+  display: grid;
+}
+
+.tool-result.success {
+  border-color: rgba(85, 255, 166, 0.24);
+  background: rgba(85, 255, 166, 0.06);
+}
+
+.tool-result.error {
+  border-color: rgba(255, 100, 100, 0.24);
+  background: rgba(255, 100, 100, 0.06);
+}
+
+.tool-result strong {
+  color: var(--text);
+}
+
+.tool-result p {
+  color: var(--muted);
+  margin: 0;
+}
+
+.tool-result .script-snippet-box {
+  margin-top: 2px;
+}
+
+.tool-login-link {
+  width: fit-content;
+}
+
 .product-badge {
   width: max-content;
   display: inline-flex;

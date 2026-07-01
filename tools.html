@@ -45,16 +45,25 @@
 
       <section class="tool-grid">
         <article class="tool-card reveal">
-          <span class="tool-icon">⇩</span>
-          <h2>Download Launcher</h2>
-          <p>พื้นที่สำหรับวางลิงก์ดาวน์โหลด launcher หรือไฟล์ติดตั้ง</p>
-          <button class="button button-glass" type="button" data-toast="ยังไม่ได้ตั้งค่าลิงก์ดาวน์โหลด">Download</button>
+          <span class="tool-icon">⌘</span>
+          <h2>คัดลอกสคริปต์</h2>
+          <p>วาง License Key ที่ซื้อไว้ ระบบจะสร้างสคริปต์พร้อม Discord ID ของบัญชีที่ล็อกอินอยู่</p>
+          <form class="tool-mini-form" id="scriptCopyForm">
+            <input id="scriptCopyKey" name="scriptCopyKey" type="text" placeholder="SHORA-XXXX-XXXXX" autocomplete="off" required />
+            <button class="button button-primary" type="submit">สร้างสคริปต์</button>
+          </form>
+          <div class="tool-result" id="scriptCopyResult" role="status" aria-live="polite"></div>
         </article>
+
         <article class="tool-card reveal">
           <span class="tool-icon">↻</span>
           <h2>Reset Device</h2>
-          <p>เตรียมไว้สำหรับระบบ reset HWID / device binding</p>
-          <button class="button button-glass" type="button" data-toast="ฟีเจอร์นี้รอต่อ backend เพิ่ม">Request reset</button>
+          <p>ล้าง HWID ของคีย์นี้ แล้วรันสคริปต์อีกครั้งเพื่อผูกกับเครื่องใหม่</p>
+          <form class="tool-mini-form" id="resetDeviceForm">
+            <input id="resetDeviceKey" name="resetDeviceKey" type="text" placeholder="SHORA-XXXX-XXXXX" autocomplete="off" required />
+            <button class="button button-glass" type="submit">Reset Device</button>
+          </form>
+          <div class="tool-result" id="resetDeviceResult" role="status" aria-live="polite"></div>
         </article>
       </section>
     </main>
