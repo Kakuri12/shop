@@ -737,10 +737,25 @@ async function loadWallet() {
   if (!balance) return false;
 
   try {
-    const data = await apiJson("/api/wallet");
     if (content) content.hidden = false;
     if (lock) lock.hidden = true;
-    updateWalletCard(data.wallet, data.user);
+    const session = await apiJson("/api/session");
+
+    if (!session.authenticated || !session.user) {
+      if (content) content.hidden = true;
+      if (lock) lock.hidden = false;
+      return false;
+    }
+
+    updateWalletCard({ balance: 0, balanceSatang: 0 }, session.user);
+
+    try {
+      const data = await apiJson("/api/wallet");
+      updateWalletCard(data.wallet, data.user || session.user);
+    } catch (walletError) {
+      setTopupResult("error", `โหลดเครดิตไม่สำเร็จ แต่บัญชีล็อกอินอยู่แล้ว ลองรีเฟรชอีกครั้งหากยอดเงินไม่ขึ้น`);
+    }
+
     return true;
   } catch (error) {
     if (content) content.hidden = true;
