@@ -1582,6 +1582,46 @@ function writeScriptSource(source) {
   fs.writeFileSync(scriptSourcePath(), String(source || ""), "utf8");
 }
 
+async function readBackendScriptSource() {
+  if (supabaseConfigured()) {
+    try {
+      const rows = await supabaseRequest("shora_script_sources?id=eq.main&select=*");
+      const row = Array.isArray(rows) ? rows[0] : null;
+      if (row && String(row.source || "").trim()) {
+        return {
+          source: row.source,
+          path: "supabase:shora_script_sources/main",
+          kind: row.kind || "database",
+        };
+      }
+    } catch (error) {
+      console.warn(`Supabase script source read failed, using file fallback: ${error.message}`);
+    }
+  }
+
+  return readScriptSource();
+}
+
+async function writeBackendScriptSource(source) {
+  const normalizedSource = String(source || "");
+  writeScriptSource(normalizedSource);
+
+  if (!supabaseConfigured()) return;
+
+  await supabaseRequest("shora_script_sources?on_conflict=id", {
+    method: "POST",
+    prefer: "resolution=merge-duplicates,return=minimal",
+    body: [
+      {
+        id: "main",
+        source: normalizedSource,
+        kind: "database",
+        updated_at: nowIso(),
+      },
+    ],
+  });
+}
+
 function luaString(value) {
   return String(value || "")
     .replace(/\\/g, "\\\\")
@@ -2000,7 +2040,7 @@ async function handleScriptSource(req, res, url) {
     return;
   }
 
-  const source = readScriptSource();
+  const source = await readBackendScriptSource();
   sendLua(res, 200, source.source);
 }
 
@@ -2689,7 +2729,7 @@ async function handleAdminApi(req, res, pathname) {
   }
 
   if (req.method === "GET" && pathname === "/api/admin/script-source") {
-    const source = readScriptSource();
+    const source = await readBackendScriptSource();
     sendJson(res, 200, {
       ok: true,
       source: source.source,
@@ -2707,10 +2747,10 @@ async function handleAdminApi(req, res, pathname) {
       return;
     }
 
-    writeScriptSource(source);
+    await writeBackendScriptSource(source);
     sendJson(res, 200, {
       ok: true,
-      path: path.relative(ROOT_DIR, scriptSourcePath()),
+      path: supabaseConfigured() ? "supabase:shora_script_sources/main" : path.relative(ROOT_DIR, scriptSourcePath()),
       bytes: Buffer.byteLength(source, "utf8"),
     });
     return;
