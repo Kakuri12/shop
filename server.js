@@ -1952,7 +1952,7 @@ function scriptMapAccessForLicense(license, context) {
       matchedMaps: matchedSlugs,
       mapSlug: matchedSlugs[0] || "",
       reason: "map_not_allowed",
-      message: "This key does not include access to this map.",
+      message: "Shora Hub: คุณยังไม่มีคีย์สำหรับแมพนี้ กรุณาซื้อสิทธิ์ของแมพนี้ก่อนใช้งาน",
     };
   }
 
@@ -2150,7 +2150,27 @@ function luaString(value) {
 }
 
 function denyLua(message) {
-  return `warn("${luaString(message)}")\nreturn\n`;
+  const safeMessage = luaString(message || "Shora Hub: key denied.");
+  return `local message = "${safeMessage}"
+warn(message)
+
+pcall(function()
+  game:GetService("StarterGui"):SetCore("SendNotification", {
+    Title = "Shora Hub",
+    Text = message,
+    Duration = 6
+  })
+end)
+
+task.wait(0.2)
+
+local player = game:GetService("Players").LocalPlayer
+if player then
+  player:Kick(message)
+end
+
+return
+`;
 }
 
 function buildScriptLoaderSnippet(key, discordId, req) {
