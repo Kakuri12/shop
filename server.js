@@ -27,6 +27,7 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || process.env.SCRIPT_API_B
 const SCRIPT_SOURCE_URL = process.env.SCRIPT_SOURCE_URL || "";
 const SCRIPT_SOURCE_FILE = process.env.SCRIPT_SOURCE_FILE || "scripts/source.lua";
 const SCRIPT_KEY_PREFIX = (process.env.SCRIPT_KEY_PREFIX || "SHORA").toUpperCase().replace(/[^A-Z0-9]/g, "") || "SHORA";
+const SCRIPT_PASS_PRODUCT_ID = "shora-pass";
 const STORE_CACHE_TTL_MS = Math.max(0, Number(process.env.STORE_CACHE_TTL_MS || 3000));
 const sessions = new Map();
 const topupLocks = new Set();
@@ -1609,6 +1610,44 @@ function scriptLicenseSelect(key, discordId) {
   return `script_licenses?license_key=eq.${postgrestValue(key)}&discord_id=eq.${postgrestValue(discordId)}&select=*`;
 }
 
+function scriptLicensesForDiscordSelect(discordId) {
+  return `script_licenses?discord_id=eq.${postgrestValue(discordId)}&select=*&order=created_at.asc`;
+}
+
+function isScriptPassLicense(license) {
+  return String(license?.product_id || license?.productId || "") === SCRIPT_PASS_PRODUCT_ID;
+}
+
+function scriptLicenseIsActive(license) {
+  if (!license || license.status !== "active") return false;
+  const expiresAt = license.expires_at || license.expiresAt;
+  return !expiresAt || new Date(expiresAt).getTime() >= Date.now();
+}
+
+function mergeAllowedMaps(...values) {
+  const normalizedSets = values.map((value) => normalizeAllowedMaps(value));
+  if (normalizedSets.some((maps) => maps.length === 0)) return [];
+  return [...new Set(normalizedSets.flat())];
+}
+
+function allowedMapsFromActiveEntitlements(licenses, fallbackMaps = []) {
+  const activeEntitlements = (Array.isArray(licenses) ? licenses : [])
+    .filter((license) => !isScriptPassLicense(license))
+    .filter(scriptLicenseIsActive);
+
+  if (!activeEntitlements.length) return normalizeAllowedMaps(fallbackMaps);
+  return mergeAllowedMaps(...activeEntitlements.map((license) => license.allowed_maps || license.allowedMaps));
+}
+
+function publicScriptPassLicense(passLicense, effectiveAllowedMaps = null) {
+  const allowedMaps = effectiveAllowedMaps ? normalizeAllowedMaps(effectiveAllowedMaps) : normalizeAllowedMaps(passLicense?.allowed_maps || passLicense?.allowedMaps);
+  return publicScriptLicense({
+    ...passLicense,
+    product_id: SCRIPT_PASS_PRODUCT_ID,
+    allowed_maps: allowedMaps,
+  });
+}
+
 function normalizeDiscordId(value) {
   return String(value || "").replace(/\D/g, "").trim();
 }
@@ -1634,12 +1673,84 @@ function generateScriptKey(prefix = SCRIPT_KEY_PREFIX) {
   return `${cleanPrefix}-${groups.join("-")}`;
 }
 
+async function createSupabaseScriptLicense(body, prefix = SCRIPT_KEY_PREFIX) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const key = generateScriptKey(prefix);
+    try {
+      const inserted = await supabaseRequest("script_licenses", {
+        method: "POST",
+        prefer: "return=representation",
+        body: {
+          ...body,
+          license_key: key,
+        },
+      });
+      return Array.isArray(inserted) ? inserted[0] : null;
+    } catch (error) {
+      lastError = error;
+      if (!/duplicate|unique/i.test(error.message) || attempt === 7) throw error;
+    }
+  }
+  throw lastError || new Error("Script key could not be created.");
+}
+
+async function ensureAccountPassLicense(discordId, options = {}) {
+  const normalizedDiscordId = normalizeDiscordId(discordId);
+  if (!supabaseConfigured() || !normalizedDiscordId) return null;
+
+  const requestedMaps = normalizeAllowedMaps(options.allowedMaps);
+  const rows = await supabaseRequest(scriptLicensesForDiscordSelect(normalizedDiscordId));
+  const licenses = Array.isArray(rows) ? rows : [];
+  const passLicense = licenses.find(isScriptPassLicense) || null;
+  const entitlementMaps = allowedMapsFromActiveEntitlements(licenses, requestedMaps);
+  const allowedMaps = mergeAllowedMaps(entitlementMaps, requestedMaps);
+  const maxDevices = Math.max(
+    1,
+    Number(options.maxDevices || 1),
+    ...licenses.map((license) => Number(license.max_devices || 1)).filter(Number.isFinite),
+  );
+  const note = String(options.note || "Shora account pass").trim();
+
+  if (passLicense) {
+    const updated = await supabaseRequest(`script_licenses?id=eq.${postgrestValue(passLicense.id)}`, {
+      method: "PATCH",
+      prefer: "return=representation",
+      body: {
+        product_id: SCRIPT_PASS_PRODUCT_ID,
+        allowed_maps: allowedMaps,
+        status: "active",
+        max_devices: maxDevices,
+        expires_at: null,
+        note,
+        updated_at: nowIso(),
+      },
+    });
+    return Array.isArray(updated) ? updated[0] : null;
+  }
+
+  return createSupabaseScriptLicense(
+    {
+      discord_id: normalizedDiscordId,
+      product_id: SCRIPT_PASS_PRODUCT_ID,
+      allowed_maps: allowedMaps,
+      status: "active",
+      max_devices: maxDevices,
+      expires_at: null,
+      note,
+      created_by: options.createdBy || "pass",
+    },
+    SCRIPT_KEY_PREFIX,
+  );
+}
+
 function publicScriptLicense(license) {
   const isExpired = license.expires_at && new Date(license.expires_at).getTime() < Date.now();
   const allowedMaps = normalizeAllowedMaps(license.allowed_maps || license.allowedMaps);
+  const isPass = isScriptPassLicense(license);
   return {
     key: license.license_key,
-    planName: license.product_id ? `Script: ${license.product_id}` : "Script License",
+    planName: isPass ? "Shora Pass" : license.product_id ? `Script: ${license.product_id}` : "Script License",
     planId: license.product_id || "",
     discordId: license.discord_id,
     productId: license.product_id || "",
@@ -1654,6 +1765,7 @@ function publicScriptLicense(license) {
     note: license.note || "",
     allowedMaps,
     allowedMapNames: mapNamesForSlugs(allowedMaps),
+    pass: isPass,
     script: true,
   };
 }
@@ -1976,27 +2088,31 @@ function buildScriptLoaderSnippet(key, discordId, req) {
 async function createScriptLicenseForCheckout(license, order, user) {
   if (!supabaseConfigured()) return null;
   const allowedMaps = normalizeAllowedMaps(license.allowedMaps || order.allowedMaps);
+  const keyPrefix = keyPrefixForAllowedMaps(allowedMaps, SCRIPT_KEY_PREFIX);
 
   try {
-    const inserted = await supabaseRequest("script_licenses", {
-      method: "POST",
-      prefer: "return=representation",
-      body: {
-        license_key: license.key,
+    await createSupabaseScriptLicense(
+      {
         discord_id: String(user.id),
         product_id: license.productId || order.productId || order.planId || "shora-hub",
         allowed_maps: allowedMaps,
         status: "active",
         max_devices: Math.max(1, Number(license.devicesLimit || 1)),
         expires_at: license.expiresAt || null,
-        note: `Issued from checkout order ${order.id}`,
+        note: `Entitlement from checkout order ${order.id}`,
         created_by: "checkout",
       },
-    });
+      keyPrefix,
+    );
 
-    return Array.isArray(inserted) ? inserted[0] : null;
+    return ensureAccountPassLicense(user.id, {
+      allowedMaps,
+      maxDevices: license.devicesLimit,
+      note: `Shora Pass updated from order ${order.id}`,
+      createdBy: "checkout",
+    });
   } catch (error) {
-    console.warn(`Supabase script license insert failed, using local key fallback: ${error.message}`);
+    console.warn(`Supabase script pass update failed, using local key fallback: ${error.message}`);
     return null;
   }
 }
@@ -2148,7 +2264,15 @@ async function verifyScriptAccess(req, url, body = {}) {
       return { allowed: false, status: 403, key, discordId, hwidHash, mapContext, reason: "key_expired", message: "This key has expired." };
     }
 
-    const mapAccess = scriptMapAccessForLicense(license, mapContext);
+    let effectiveAllowedMaps = normalizeAllowedMaps(license.allowed_maps);
+    let licenseForAccess = license;
+    if (isScriptPassLicense(license)) {
+      const allLicenses = await supabaseRequest(scriptLicensesForDiscordSelect(discordId));
+      effectiveAllowedMaps = allowedMapsFromActiveEntitlements(allLicenses, license.allowed_maps);
+      licenseForAccess = { ...license, allowed_maps: effectiveAllowedMaps };
+    }
+
+    const mapAccess = scriptMapAccessForLicense(licenseForAccess, mapContext);
     if (!mapAccess.allowed) {
       return {
         allowed: false,
@@ -2162,7 +2286,7 @@ async function verifyScriptAccess(req, url, body = {}) {
         allowedMaps: mapAccess.allowedMaps,
         reason: mapAccess.reason,
         message: mapAccess.message,
-        license,
+        license: licenseForAccess,
       };
     }
 
@@ -2193,6 +2317,10 @@ async function verifyScriptAccess(req, url, body = {}) {
 
     if (currentLicense.hwid_hash !== hwidHash) {
       return { allowed: false, status: 403, key, discordId, hwidHash, mapContext, mapSlug: mapAccess.mapSlug, matchedMaps: mapAccess.matchedMaps, allowedMaps: mapAccess.allowedMaps, reason: "hwid_mismatch", message: "This key is already linked to another device." };
+    }
+
+    if (isScriptPassLicense(currentLicense)) {
+      currentLicense = { ...currentLicense, allowed_maps: effectiveAllowedMaps };
     }
 
     return {
@@ -2365,12 +2493,22 @@ async function findUserScriptLicense(key, discordId, store = readStore()) {
       const rows = await supabaseRequest(scriptLicenseSelect(normalizedKey, normalizedDiscordId));
       const license = Array.isArray(rows) ? rows[0] : null;
       if (license) {
+        let resolvedLicense = license;
+        if (!isScriptPassLicense(license)) {
+          const passLicense = await ensureAccountPassLicense(normalizedDiscordId, {
+            allowedMaps: license.allowed_maps,
+            maxDevices: license.max_devices,
+            note: `Shora Pass linked from ${license.license_key}`,
+            createdBy: "tool",
+          });
+          if (passLicense) resolvedLicense = passLicense;
+        }
         return {
           backend: "supabase",
-          key: normalizedKey,
+          key: resolvedLicense.license_key,
           discordId: normalizedDiscordId,
-          license,
-          publicLicense: publicScriptLicense(license),
+          license: resolvedLicense,
+          publicLicense: isScriptPassLicense(resolvedLicense) ? publicScriptPassLicense(resolvedLicense) : publicScriptLicense(resolvedLicense),
         };
       }
     } catch (error) {
@@ -2875,7 +3013,18 @@ async function handleApi(req, res, url) {
       if (product) {
         store.inventory[product.id] = Math.max(0, Number(product.stock || 0) - 1);
       }
-      await createScriptLicenseForCheckout(license, order, session.user);
+      const scriptPass = await createScriptLicenseForCheckout(license, order, session.user);
+      if (scriptPass) {
+        const publicPass = publicScriptPassLicense(scriptPass);
+        license.key = publicPass.key;
+        license.planId = publicPass.planId;
+        license.planName = publicPass.planName;
+        license.productId = publicPass.productId;
+        license.allowedMaps = publicPass.allowedMaps;
+        license.devicesLimit = publicPass.devicesLimit;
+        license.expiresAt = publicPass.expiresAt;
+        order.licenseKey = publicPass.key;
+      }
       await saveBackendStore(store);
 
       sendJson(res, 201, {
@@ -3123,42 +3272,34 @@ async function handleAdminApi(req, res, pathname) {
     }
 
     if (supabaseConfigured()) {
-      let key = "";
-      let created = null;
       try {
-        for (let attempt = 0; attempt < 8; attempt += 1) {
-          key = generateScriptKey(keyPrefix);
-          try {
-            const inserted = await supabaseRequest("script_licenses", {
-              method: "POST",
-              prefer: "return=representation",
-              body: {
-                license_key: key,
-                discord_id: discordId,
-                product_id: productId,
-                allowed_maps: allowedMaps,
-                status: "active",
-                max_devices: maxDevices,
-                expires_at: scriptExpiresAt(durationDays),
-                note: String(body.note || "").trim(),
-                created_by: "admin",
-              },
-            });
-            created = Array.isArray(inserted) ? inserted[0] : null;
-            break;
-          } catch (error) {
-            if (!/duplicate|unique/i.test(error.message) || attempt === 7) throw error;
-          }
-        }
-
-        if (!created) {
-          throw new Error("Script key was created but Supabase did not return the row.");
-        }
+        const entitlement = await createSupabaseScriptLicense(
+          {
+            discord_id: discordId,
+            product_id: productId,
+            allowed_maps: allowedMaps,
+            status: "active",
+            max_devices: maxDevices,
+            expires_at: scriptExpiresAt(durationDays),
+            note: String(body.note || "").trim(),
+            created_by: "admin",
+          },
+          keyPrefix,
+        );
+        const passLicense = await ensureAccountPassLicense(discordId, {
+          allowedMaps,
+          maxDevices,
+          note: `Shora Pass updated from admin issue ${entitlement?.license_key || productId}`,
+          createdBy: "admin",
+        });
+        const publicPass = passLicense ? publicScriptPassLicense(passLicense) : publicScriptLicense(entitlement);
+        const responseKey = publicPass.key || entitlement.license_key;
 
         sendJson(res, 201, {
           ok: true,
-          license: publicScriptLicense(created),
-          loader: buildScriptLoaderSnippet(key, discordId, req),
+          license: publicPass,
+          entitlement: entitlement ? publicScriptLicense(entitlement) : null,
+          loader: buildScriptLoaderSnippet(responseKey, discordId, req),
           backend: "supabase",
         });
         return;

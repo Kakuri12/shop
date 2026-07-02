@@ -608,7 +608,7 @@ async function submitCheckout(event) {
 
   submitButton.disabled = true;
   result.className = "checkout-result show";
-  result.textContent = "กำลังหักเครดิตและสร้าง key...";
+  result.textContent = "กำลังหักเครดิตและอัปเดต Shora Pass...";
 
   try {
     const data = await apiJson("/api/checkout", {
@@ -619,9 +619,9 @@ async function submitCheckout(event) {
 
     result.innerHTML = `
       <div class="license-box">
-        <strong>สร้าง key สำเร็จ</strong>
+        <strong>อัปเดต Shora Pass สำเร็จ</strong>
         <code>${escapeHtml(data.license.key)}</code>
-        <p>${escapeHtml(data.order.planName)} • หมดอายุ: ${escapeHtml(formatDate(data.license.expiresAt))}</p>
+        <p>${escapeHtml(data.order.planName)} • แมพที่ใช้ได้: ${escapeHtml(licenseMapText(data.license))}</p>
         <button class="button button-glass" type="button" data-copy="${escapeHtml(data.license.key)}">Copy key</button>
         ${scriptSnippetBox(data.script?.loader || "", "สคริปต์ของคุณ")}
       </div>
