@@ -30,6 +30,7 @@ const reloadScriptSourceButton = document.querySelector("#reloadScriptSource");
 const toast = document.querySelector("#toast");
 let latestLoaderSnippet = "";
 let latestCategories = [];
+let latestScriptMaps = [];
 
 const savedToken = localStorage.getItem("shorakey_admin_token") || localStorage.getItem("xenonkey_admin_token");
 if (savedToken) tokenInput.value = savedToken;
@@ -64,6 +65,29 @@ function formatDate(value) {
 
 function formatMoney(value) {
   return `฿${Number(value || 0).toLocaleString("th-TH")}`;
+}
+
+function mapLabelList(slugsOrNames) {
+  const values = Array.isArray(slugsOrNames) ? slugsOrNames.filter(Boolean) : [];
+  if (!values.length) return "ทุกแมพ";
+  const names = new Map(latestScriptMaps.map((map) => [map.slug, map.name]));
+  return values.map((value) => names.get(value) || value).join(", ");
+}
+
+function mapsTagHtml(slugsOrNames) {
+  const label = mapLabelList(slugsOrNames);
+  return `<span class="tag ${label === "ทุกแมพ" ? "active" : "expired"}">${escapeHtml(label)}</span>`;
+}
+
+function renderScriptMapHints() {
+  const hints = document.querySelectorAll(".script-map-hints");
+  if (!hints.length) return;
+  const text = latestScriptMaps.length
+    ? `Slug ที่ใช้ได้: ${latestScriptMaps.map((map) => `${map.slug} (${map.name})`).join(", ")}`
+    : "เว้นว่างไว้หากต้องการให้ใช้ได้ทุกแมพ";
+  hints.forEach((hint) => {
+    hint.textContent = text;
+  });
 }
 
 function escapeHtml(value) {
@@ -204,7 +228,7 @@ function renderProducts(products, categories = []) {
   if (productCount) productCount.textContent = String(products.length);
 
   if (!products.length) {
-    productsTable.innerHTML = '<tr><td colspan="6" class="empty-state">ยังไม่มีสินค้า</td></tr>';
+    productsTable.innerHTML = '<tr><td colspan="7" class="empty-state">ยังไม่มีสินค้า</td></tr>';
     return;
   }
 
@@ -230,6 +254,7 @@ function renderProducts(products, categories = []) {
           <td>${escapeHtml(categoryNames.get(product.categorySlug) || product.categorySlug)}</td>
           <td>${escapeHtml(formatMoney(product.price))}</td>
           <td><strong>${Number(product.stock || 0).toLocaleString("th-TH")}</strong></td>
+          <td>${mapsTagHtml(product.allowedMaps || product.allowedMapNames)}</td>
           <td><span class="tag ${statusClass}">${statusText}</span></td>
           <td>
             <div class="table-actions">
@@ -245,11 +270,25 @@ function renderProducts(products, categories = []) {
 async function loadProducts() {
   if (!productsTable) return;
   try {
+    if (!latestScriptMaps.length) await loadScriptMaps();
     const data = await adminFetch("/api/admin/products");
     renderCategories(data.categories || []);
     renderProducts(data.products || [], data.categories || []);
   } catch (error) {
-    productsTable.innerHTML = `<tr><td colspan="6" class="empty-state">${escapeHtml(error.message)}</td></tr>`;
+    productsTable.innerHTML = `<tr><td colspan="7" class="empty-state">${escapeHtml(error.message)}</td></tr>`;
+  }
+}
+
+async function loadScriptMaps() {
+  try {
+    const data = await adminFetch("/api/admin/script-maps");
+    latestScriptMaps = data.maps || [];
+    renderScriptMapHints();
+    return latestScriptMaps;
+  } catch {
+    latestScriptMaps = [];
+    renderScriptMapHints();
+    return [];
   }
 }
 
@@ -327,7 +366,7 @@ function renderScriptKeys(keys) {
   if (!scriptKeysTable) return;
   if (scriptKeyCount) scriptKeyCount.textContent = String(keys.length);
   if (!keys.length) {
-    scriptKeysTable.innerHTML = '<tr><td colspan="6" class="empty-state">No script keys yet.</td></tr>';
+    scriptKeysTable.innerHTML = '<tr><td colspan="7" class="empty-state">No script keys yet.</td></tr>';
     return;
   }
 
@@ -346,6 +385,7 @@ function renderScriptKeys(keys) {
           <td>${escapeHtml(license.discordId)}</td>
           <td><span class="tag ${statusClass}">${escapeHtml(license.status)}</span></td>
           <td><span class="tag ${hwidClass}">${escapeHtml(hwidText)}</span></td>
+          <td>${mapsTagHtml(license.allowedMaps || license.allowedMapNames)}</td>
           <td>${escapeHtml(formatDate(license.expiresAt))}</td>
           <td>
             <div class="table-actions">
@@ -363,10 +403,11 @@ function renderScriptKeys(keys) {
 async function loadScriptKeys() {
   if (!scriptKeysTable) return;
   try {
+    if (!latestScriptMaps.length) await loadScriptMaps();
     const data = await adminFetch("/api/admin/script-keys");
     renderScriptKeys(data.keys);
   } catch (error) {
-    scriptKeysTable.innerHTML = `<tr><td colspan="6" class="empty-state">${escapeHtml(error.message)}</td></tr>`;
+    scriptKeysTable.innerHTML = `<tr><td colspan="7" class="empty-state">${escapeHtml(error.message)}</td></tr>`;
   }
 }
 
@@ -394,12 +435,15 @@ async function loadAdmin() {
   adminStatus.textContent = "Loading dashboard...";
 
   try {
-    const [summaryData, keyData, productData, orderData] = await Promise.all([
+    const [summaryData, keyData, productData, orderData, mapData] = await Promise.all([
       adminFetch("/api/admin/summary"),
       adminFetch("/api/admin/keys"),
       adminFetch("/api/admin/products"),
       adminFetch("/api/admin/orders"),
+      adminFetch("/api/admin/script-maps"),
     ]);
+    latestScriptMaps = mapData.maps || [];
+    renderScriptMapHints();
     renderMetrics(summaryData.summary);
     renderKeys(keyData.keys);
     renderCategories(productData.categories || []);

@@ -108,6 +108,37 @@ const categories = [
   },
 ];
 
+const scriptMaps = [
+  { slug: "blox-fruits", name: "Blox Fruits", gameIds: ["994732206"] },
+  { slug: "king-legacy", name: "King Legacy", placeIds: ["4520749081", "6381829480", "5931540094", "6596144663", "15759515082"] },
+  { slug: "blade-ball", name: "Blade Ball", creatorIds: ["12836673"] },
+  { slug: "anime-fighting-simulator", name: "Anime Fighting Simulator", placeIds: ["6299805723"] },
+  { slug: "rgh", name: "RGH", placeIds: ["914010731"] },
+  { slug: "haze-piece", name: "Haze Piece", placeIds: ["6918802270", "14979402479"] },
+  { slug: "anime-last-stand", name: "Anime Last Stand", creatorIds: ["12229756"] },
+  { slug: "drive-empire", name: "Drive Empire", placeIds: ["3351674303"] },
+  { slug: "sols-rng", name: "Sol's RNG", placeIds: ["15532962292"] },
+  { slug: "attack-on-titan-revolution", name: "Attack on Titan Revolution", creatorIds: ["17347863"] },
+  { slug: "anime-defenders", name: "Anime Defenders", creatorIds: ["34121350"] },
+  { slug: "anime-vanguards", name: "Anime Vanguards", creatorIds: ["17219742"] },
+  { slug: "fisch", name: "Fisch", creatorIds: ["7381705"], placeIds: ["16732694052"] },
+  { slug: "anime-adventures", name: "Anime Adventures", creatorIds: ["10611639"] },
+  { slug: "blue-lock", name: "Blue Lock", gameIds: ["6325068386"] },
+  { slug: "arise-crossover", name: "Arise Crossover", gameIds: ["7074860883"], placeIds: ["87039211657390"] },
+  { slug: "bubble-gum-simulator-infinity", name: "Bubble Gum Simulator Infinity", gameIds: ["7436755782"], creatorIds: ["33720745"] },
+  { slug: "grow-a-garden", name: "Grow a Garden", gameIds: ["9509842868"] },
+  { slug: "all-star-tower-defense-x", name: "All Star Tower Defense X", gameIds: ["6057699512"] },
+  { slug: "99-nights-in-the-forest", name: "99 Nights in the Forest", gameIds: ["7326934954"] },
+  { slug: "zombie", name: "Zombie", gameIds: ["7750955984"] },
+  { slug: "fish-it", name: "Fish It", gameIds: ["121864768012064"] },
+  { slug: "build-a-zoo", name: "Build A Zoo", gameIds: ["8066283370"] },
+  {
+    slug: "misc-supported",
+    name: "Other Supported Maps",
+    gameIds: ["6701277882", "7671049560", "7394964165", "8144728961", "5130394318", "9186719164", "8202280624", "9348272796", "10200395747"],
+  },
+];
+
 const catalogProducts = [
   {
     id: "xenon-daily",
@@ -872,8 +903,47 @@ function productsForAdmin(store = readStore()) {
   ];
 }
 
+function normalizeScriptMapSlug(value) {
+  const normalized = slugify(String(value || "").trim());
+  if (!normalized || normalized === "all" || normalized === "any") return "";
+  return normalized;
+}
+
+function scriptMapSlugSet() {
+  return new Set(scriptMaps.map((map) => map.slug));
+}
+
+function normalizeAllowedMaps(value) {
+  const known = scriptMapSlugSet();
+  const source = Array.isArray(value) ? value : String(value || "").split(/[\s,]+/);
+  const slugs = source
+    .map(normalizeScriptMapSlug)
+    .filter((slug) => slug && known.has(slug));
+  return [...new Set(slugs)];
+}
+
+function allowedMapsForProduct(product) {
+  return normalizeAllowedMaps(product?.allowedMaps || product?.maps || product?.scriptMaps);
+}
+
+function mapNamesForSlugs(slugs) {
+  const names = new Map(scriptMaps.map((map) => [map.slug, map.name]));
+  return normalizeAllowedMaps(slugs).map((slug) => names.get(slug) || slug);
+}
+
+function scriptMapOptions() {
+  return scriptMaps.map((map) => ({
+    slug: map.slug,
+    name: map.name,
+    gameIds: map.gameIds || [],
+    placeIds: map.placeIds || [],
+    creatorIds: map.creatorIds || [],
+  }));
+}
+
 function adminProduct(product, store, source = "custom") {
   const deleted = isProductDeleted(store, product.id);
+  const allowedMaps = allowedMapsForProduct(product);
   return {
     id: product.id,
     categorySlug: product.categorySlug,
@@ -886,6 +956,8 @@ function adminProduct(product, store, source = "custom") {
     stock: store ? productStockForStore(store, product) : baseProductStock(product),
     image: product.image || "",
     features: Array.isArray(product.features) ? product.features : [],
+    allowedMaps,
+    allowedMapNames: mapNamesForSlugs(allowedMaps),
     source,
     hidden: deleted || product.hidden === true || product.status === "hidden",
     deleted,
@@ -922,6 +994,7 @@ function normalizeAdminProduct(body, existingProduct, usedIds, store = readStore
   const devicesLimit = Math.max(1, Math.min(10, Math.round(Number(body.devicesLimit ?? existingProduct?.devicesLimit ?? 1))));
   const stock = Math.max(0, Math.round(Number(body.stock ?? existingProduct?.stock ?? 35)));
   const features = normalizeProductFeatures(body.features ?? existingProduct?.features);
+  const allowedMaps = normalizeAllowedMaps(body.allowedMaps ?? existingProduct?.allowedMaps ?? "");
   const timestamp = nowIso();
 
   return {
@@ -936,6 +1009,7 @@ function normalizeAdminProduct(body, existingProduct, usedIds, store = readStore
     stock,
     image: String(body.image || existingProduct?.image || category.image || "/assets/site-logo.png").trim(),
     features: features.length ? features : ["รับคีย์ทันที", "ใช้งานได้หลังซื้อสำเร็จ"],
+    allowedMaps,
     hidden: body.hidden === true || body.hidden === "true" || existingProduct?.hidden === true,
     source: "admin",
     createdAt: existingProduct?.createdAt || timestamp,
@@ -1063,6 +1137,8 @@ function publicOrder(order) {
     currency: order.currency || "THB",
     status: order.status || "",
     licenseKey: order.licenseKey || "",
+    allowedMaps: normalizeAllowedMaps(order.allowedMaps),
+    allowedMapNames: mapNamesForSlugs(order.allowedMaps),
     createdAt: order.createdAt || null,
   };
 }
@@ -1167,6 +1243,7 @@ function categoryFor(slug, store = readStore()) {
 
 function offerFromProduct(product, store) {
   const category = store ? categoryFor(product.categorySlug, store) : categoryListForStore(readStore(), { includeHidden: true }).find((item) => item.slug === product.categorySlug);
+  const allowedMaps = allowedMapsForProduct(product);
   return {
     id: product.id,
     name: product.name,
@@ -1177,6 +1254,7 @@ function offerFromProduct(product, store) {
     productId: product.id,
     categorySlug: product.categorySlug,
     categoryName: category ? category.name : product.categorySlug,
+    allowedMaps,
   };
 }
 
@@ -1205,6 +1283,8 @@ function publicLicense(license) {
     productId: license.productId || null,
     categorySlug: license.categorySlug || null,
     categoryName: license.categoryName || null,
+    allowedMaps: normalizeAllowedMaps(license.allowedMaps || license.maps),
+    allowedMapNames: mapNamesForSlugs(license.allowedMaps || license.maps),
   };
 }
 
@@ -1249,6 +1329,7 @@ function createLicense(store, offer, order, note = "") {
     contact: order.contact,
     orderId: order.id,
     devicesLimit: offer.devicesLimit,
+    allowedMaps: normalizeAllowedMaps(offer.allowedMaps),
     activations: [],
     createdAt: nowIso(),
     expiresAt: addDays(offer.durationDays),
@@ -1535,17 +1616,25 @@ function generateScriptKey() {
 
 function publicScriptLicense(license) {
   const isExpired = license.expires_at && new Date(license.expires_at).getTime() < Date.now();
+  const allowedMaps = normalizeAllowedMaps(license.allowed_maps || license.allowedMaps);
   return {
     key: license.license_key,
+    planName: license.product_id ? `Script: ${license.product_id}` : "Script License",
+    planId: license.product_id || "",
     discordId: license.discord_id,
     productId: license.product_id || "",
     status: isExpired && license.status === "active" ? "expired" : license.status,
     maxDevices: license.max_devices,
+    devicesLimit: license.max_devices,
+    devicesUsed: license.hwid_hash ? 1 : 0,
     hwidBound: Boolean(license.hwid_hash),
     hwidBoundAt: license.hwid_bound_at,
     createdAt: license.created_at,
     expiresAt: license.expires_at,
     note: license.note || "",
+    allowedMaps,
+    allowedMapNames: mapNamesForSlugs(allowedMaps),
+    script: true,
   };
 }
 
@@ -1553,18 +1642,24 @@ function publicLocalScriptLicense(license) {
   const discordId = String(license.contact || "").startsWith("discord:") ? String(license.contact).slice("discord:".length) : "";
   const activation = Array.isArray(license.activations) ? license.activations[0] : null;
   const status = effectiveStatus(license);
+  const allowedMaps = normalizeAllowedMaps(license.allowedMaps || license.maps);
   return {
     key: license.key,
     discordId,
     productId: license.productId || license.planId || "",
     status,
     maxDevices: Number(license.devicesLimit || 1),
+    devicesLimit: Number(license.devicesLimit || 1),
+    devicesUsed: Array.isArray(license.activations) ? license.activations.length : 0,
     hwidBound: Boolean(activation?.hwidHash || activation?.deviceId),
     hwidBoundAt: activation?.firstSeenAt || activation?.activatedAt || null,
     createdAt: license.createdAt,
     expiresAt: license.expiresAt,
     note: license.note || "",
+    allowedMaps,
+    allowedMapNames: mapNamesForSlugs(allowedMaps),
     backend: "local",
+    script: true,
   };
 }
 
@@ -1580,12 +1675,14 @@ function createLocalScriptLicenseForAdmin(store, body) {
   const productId = String(body.productId || "shora-hub-v1").trim();
   const durationDays = Number(body.durationDays || 30);
   const maxDevices = Math.max(1, Math.min(10, Number(body.maxDevices || 1)));
+  const product = findProduct(productId, store);
+  const requestedMaps = normalizeAllowedMaps(body.allowedMaps);
+  const allowedMaps = requestedMaps.length ? requestedMaps : allowedMapsForProduct(product);
 
   if (!discordId) {
     throw new Error("Discord ID is required");
   }
 
-  const product = findProduct(productId, store);
   const keySet = new Set(store.keys.map((license) => license.key));
   let key = "";
   do {
@@ -1606,6 +1703,7 @@ function createLocalScriptLicenseForAdmin(store, body) {
     contact: `discord:${discordId}`,
     orderId: null,
     devicesLimit: maxDevices,
+    allowedMaps,
     activations: [],
     createdAt: nowIso(),
     expiresAt: scriptExpiresAt(durationDays),
@@ -1627,6 +1725,94 @@ function requestIp(req) {
   return forwarded || req.socket.remoteAddress || "";
 }
 
+function normalizeRuntimeId(value) {
+  return String(value || "").replace(/[^\d]/g, "");
+}
+
+function scriptRuntimeContext(url, body = {}) {
+  return {
+    gameId: normalizeRuntimeId(body.gameId || body.game_id || url.searchParams.get("gameId") || url.searchParams.get("game_id")),
+    placeId: normalizeRuntimeId(body.placeId || body.place_id || url.searchParams.get("placeId") || url.searchParams.get("place_id")),
+    creatorId: normalizeRuntimeId(body.creatorId || body.creator_id || url.searchParams.get("creatorId") || url.searchParams.get("creator_id")),
+  };
+}
+
+function idMatches(list, value) {
+  return Boolean(value && Array.isArray(list) && list.map(String).includes(String(value)));
+}
+
+function matchedScriptMaps(context) {
+  if (!context?.gameId && !context?.placeId && !context?.creatorId) return [];
+  return scriptMaps.filter((map) =>
+    idMatches(map.gameIds, context.gameId) ||
+    idMatches(map.placeIds, context.placeId) ||
+    idMatches(map.creatorIds, context.creatorId),
+  );
+}
+
+function scriptMapAccessForLicense(license, context) {
+  const allowedMaps = normalizeAllowedMaps(license?.allowed_maps || license?.allowedMaps || license?.maps);
+  const matchedMaps = matchedScriptMaps(context);
+  const matchedSlugs = matchedMaps.map((map) => map.slug);
+
+  if (!allowedMaps.length) {
+    return {
+      allowed: true,
+      allowedAllMaps: true,
+      allowedMaps,
+      matchedMaps: matchedSlugs,
+      mapSlug: matchedSlugs[0] || "",
+      reason: "all_maps",
+    };
+  }
+
+  if (!context?.gameId && !context?.placeId && !context?.creatorId) {
+    return {
+      allowed: false,
+      allowedAllMaps: false,
+      allowedMaps,
+      matchedMaps: matchedSlugs,
+      mapSlug: "",
+      reason: "missing_map_context",
+      message: "Missing Roblox map information.",
+    };
+  }
+
+  if (!matchedSlugs.length) {
+    return {
+      allowed: false,
+      allowedAllMaps: false,
+      allowedMaps,
+      matchedMaps: matchedSlugs,
+      mapSlug: "",
+      reason: "unknown_map",
+      message: "This map is not registered in Shora Hub.",
+    };
+  }
+
+  const matchedAllowed = matchedSlugs.find((slug) => allowedMaps.includes(slug));
+  if (!matchedAllowed) {
+    return {
+      allowed: false,
+      allowedAllMaps: false,
+      allowedMaps,
+      matchedMaps: matchedSlugs,
+      mapSlug: matchedSlugs[0] || "",
+      reason: "map_not_allowed",
+      message: "This key does not include access to this map.",
+    };
+  }
+
+  return {
+    allowed: true,
+    allowedAllMaps: false,
+    allowedMaps,
+    matchedMaps: matchedSlugs,
+    mapSlug: matchedAllowed,
+    reason: "map_allowed",
+  };
+}
+
 async function logScriptAuthAttempt(req, payload) {
   if (!supabaseConfigured()) return;
   try {
@@ -1639,6 +1825,10 @@ async function logScriptAuthAttempt(req, payload) {
         hwid_hash: payload.hwidHash || null,
         allowed: Boolean(payload.allowed),
         reason: payload.reason || "",
+        map_slug: payload.mapSlug || null,
+        game_id: payload.mapContext?.gameId || null,
+        place_id: payload.mapContext?.placeId || null,
+        creator_id: payload.mapContext?.creatorId || null,
         ip_text: requestIp(req),
         user_agent: String(req.headers["user-agent"] || "").slice(0, 500),
       },
@@ -1764,6 +1954,7 @@ function buildScriptLoaderSnippet(key, discordId, req) {
 
 async function createScriptLicenseForCheckout(license, order, user) {
   if (!supabaseConfigured()) return null;
+  const allowedMaps = normalizeAllowedMaps(license.allowedMaps || order.allowedMaps);
 
   try {
     const inserted = await supabaseRequest("script_licenses", {
@@ -1773,6 +1964,7 @@ async function createScriptLicenseForCheckout(license, order, user) {
         license_key: license.key,
         discord_id: String(user.id),
         product_id: license.productId || order.productId || order.planId || "shora-hub",
+        allowed_maps: allowedMaps,
         status: "active",
         max_devices: Math.max(1, Number(license.devicesLimit || 1)),
         expires_at: license.expiresAt || null,
@@ -1815,6 +2007,9 @@ local function getHWID()
 end
 
 local hwid = getHWID()
+local GameId = tostring(game.GameId or "")
+local PlaceId = tostring(game.PlaceId or "")
+local CreatorId = tostring(game.CreatorId or "")
 local requestFn = (syn and syn.request) or (http and http.request) or http_request or request
 local response
 
@@ -1827,12 +2022,15 @@ if requestFn then
       key = Key,
       discordId = DiscordId,
       id = DiscordId,
-      hwid = hwid
+      hwid = hwid,
+      gameId = GameId,
+      placeId = PlaceId,
+      creatorId = CreatorId
     })
   })
 else
   response = {
-    Body = game:HttpGet("${sourceUrl}?key=" .. HttpService:UrlEncode(Key) .. "&id=" .. HttpService:UrlEncode(DiscordId) .. "&hwid=" .. HttpService:UrlEncode(hwid))
+    Body = game:HttpGet("${sourceUrl}?key=" .. HttpService:UrlEncode(Key) .. "&id=" .. HttpService:UrlEncode(DiscordId) .. "&hwid=" .. HttpService:UrlEncode(hwid) .. "&gameId=" .. HttpService:UrlEncode(GameId) .. "&placeId=" .. HttpService:UrlEncode(PlaceId) .. "&creatorId=" .. HttpService:UrlEncode(CreatorId))
   }
 end
 
@@ -1899,17 +2097,18 @@ async function verifyScriptAccess(req, url, body = {}) {
   const discordId = normalizeDiscordId(body.discordId || body.id || url.searchParams.get("discordId") || url.searchParams.get("id"));
   const hwid = normalizeHwid(body.hwid || body.hwidId || url.searchParams.get("hwid"));
   const hwidHash = hwid ? hashHwid(hwid) : "";
+  const mapContext = scriptRuntimeContext(url, body);
 
   if (!key || key.length < 12) {
-    return { allowed: false, status: 400, key, discordId, hwidHash, reason: "missing_key", message: "Missing or invalid key." };
+    return { allowed: false, status: 400, key, discordId, hwidHash, mapContext, reason: "missing_key", message: "Missing or invalid key." };
   }
 
   if (!discordId) {
-    return { allowed: false, status: 400, key, discordId, hwidHash, reason: "missing_discord_id", message: "Missing Discord ID." };
+    return { allowed: false, status: 400, key, discordId, hwidHash, mapContext, reason: "missing_discord_id", message: "Missing Discord ID." };
   }
 
   if (!hwid) {
-    return { allowed: false, status: 400, key, discordId, hwidHash, reason: "missing_hwid", message: "Missing HWID." };
+    return { allowed: false, status: 400, key, discordId, hwidHash, mapContext, reason: "missing_hwid", message: "Missing HWID." };
   }
 
   try {
@@ -1917,15 +2116,33 @@ async function verifyScriptAccess(req, url, body = {}) {
     const license = Array.isArray(rows) ? rows[0] : null;
 
     if (!license) {
-      return { allowed: false, status: 404, key, discordId, hwidHash, reason: "invalid_key", message: "Key or Discord ID is incorrect." };
+      return { allowed: false, status: 404, key, discordId, hwidHash, mapContext, reason: "invalid_key", message: "Key or Discord ID is incorrect." };
     }
 
     if (license.status !== "active") {
-      return { allowed: false, status: 403, key, discordId, hwidHash, reason: "key_not_active", message: "This key is not active." };
+      return { allowed: false, status: 403, key, discordId, hwidHash, mapContext, reason: "key_not_active", message: "This key is not active." };
     }
 
     if (license.expires_at && new Date(license.expires_at).getTime() < Date.now()) {
-      return { allowed: false, status: 403, key, discordId, hwidHash, reason: "key_expired", message: "This key has expired." };
+      return { allowed: false, status: 403, key, discordId, hwidHash, mapContext, reason: "key_expired", message: "This key has expired." };
+    }
+
+    const mapAccess = scriptMapAccessForLicense(license, mapContext);
+    if (!mapAccess.allowed) {
+      return {
+        allowed: false,
+        status: 403,
+        key,
+        discordId,
+        hwidHash,
+        mapContext,
+        mapSlug: mapAccess.mapSlug,
+        matchedMaps: mapAccess.matchedMaps,
+        allowedMaps: mapAccess.allowedMaps,
+        reason: mapAccess.reason,
+        message: mapAccess.message,
+        license,
+      };
     }
 
     let boundNow = false;
@@ -1954,7 +2171,7 @@ async function verifyScriptAccess(req, url, body = {}) {
     }
 
     if (currentLicense.hwid_hash !== hwidHash) {
-      return { allowed: false, status: 403, key, discordId, hwidHash, reason: "hwid_mismatch", message: "This key is already linked to another device." };
+      return { allowed: false, status: 403, key, discordId, hwidHash, mapContext, mapSlug: mapAccess.mapSlug, matchedMaps: mapAccess.matchedMaps, allowedMaps: mapAccess.allowedMaps, reason: "hwid_mismatch", message: "This key is already linked to another device." };
     }
 
     return {
@@ -1963,6 +2180,10 @@ async function verifyScriptAccess(req, url, body = {}) {
       key,
       discordId,
       hwidHash,
+      mapContext,
+      mapSlug: mapAccess.mapSlug,
+      matchedMaps: mapAccess.matchedMaps,
+      allowedMaps: mapAccess.allowedMaps,
       reason: boundNow ? "bound_hwid" : "ok",
       message: boundNow ? "Key linked to this device." : "Key accepted.",
       license: currentLicense,
@@ -1978,28 +2199,47 @@ function verifyLocalScriptAccess(req, url, body = {}) {
   const discordId = normalizeDiscordId(body.discordId || body.id || url.searchParams.get("discordId") || url.searchParams.get("id"));
   const hwid = normalizeHwid(body.hwid || body.hwidId || url.searchParams.get("hwid"));
   const hwidHash = hwid ? hashHwid(hwid) : "";
+  const mapContext = scriptRuntimeContext(url, body);
 
   if (!key || key.length < 12) {
-    return { allowed: false, status: 400, key, discordId, hwidHash, reason: "missing_key", message: "Missing or invalid key." };
+    return { allowed: false, status: 400, key, discordId, hwidHash, mapContext, reason: "missing_key", message: "Missing or invalid key." };
   }
 
   if (!discordId) {
-    return { allowed: false, status: 400, key, discordId, hwidHash, reason: "missing_discord_id", message: "Missing Discord ID." };
+    return { allowed: false, status: 400, key, discordId, hwidHash, mapContext, reason: "missing_discord_id", message: "Missing Discord ID." };
   }
 
   if (!hwid) {
-    return { allowed: false, status: 400, key, discordId, hwidHash, reason: "missing_hwid", message: "Missing HWID." };
+    return { allowed: false, status: 400, key, discordId, hwidHash, mapContext, reason: "missing_hwid", message: "Missing HWID." };
   }
 
   const store = readStore();
   const license = store.keys.find((item) => item.key === key);
   if (!license || license.contact !== `discord:${discordId}`) {
-    return { allowed: false, status: 404, key, discordId, hwidHash, reason: "invalid_key", message: "Key or Discord ID is incorrect." };
+    return { allowed: false, status: 404, key, discordId, hwidHash, mapContext, reason: "invalid_key", message: "Key or Discord ID is incorrect." };
   }
 
   const status = effectiveStatus(license);
   if (status !== "active") {
-    return { allowed: false, status: 403, key, discordId, hwidHash, reason: `key_${status}`, message: "This key is not active." };
+    return { allowed: false, status: 403, key, discordId, hwidHash, mapContext, reason: `key_${status}`, message: "This key is not active." };
+  }
+
+  const mapAccess = scriptMapAccessForLicense(license, mapContext);
+  if (!mapAccess.allowed) {
+    return {
+      allowed: false,
+      status: 403,
+      key,
+      discordId,
+      hwidHash,
+      mapContext,
+      mapSlug: mapAccess.mapSlug,
+      matchedMaps: mapAccess.matchedMaps,
+      allowedMaps: mapAccess.allowedMaps,
+      reason: mapAccess.reason,
+      message: mapAccess.message,
+      license,
+    };
   }
 
   if (!Array.isArray(license.activations)) license.activations = [];
@@ -2015,12 +2255,17 @@ function verifyLocalScriptAccess(req, url, body = {}) {
       key,
       discordId,
       hwidHash,
+      mapContext,
+      mapSlug: mapAccess.mapSlug,
+      matchedMaps: mapAccess.matchedMaps,
+      allowedMaps: mapAccess.allowedMaps,
       reason: "ok_local",
       message: "Key accepted.",
       license: {
         license_key: license.key,
         discord_id: discordId,
         product_id: license.productId || "",
+        allowed_maps: mapAccess.allowedMaps,
         status: "active",
         max_devices: maxDevices,
         hwid_hash: hwidHash,
@@ -2033,7 +2278,7 @@ function verifyLocalScriptAccess(req, url, body = {}) {
   }
 
   if (license.activations.length >= maxDevices) {
-    return { allowed: false, status: 403, key, discordId, hwidHash, reason: "hwid_mismatch", message: "This key is already linked to another device." };
+    return { allowed: false, status: 403, key, discordId, hwidHash, mapContext, mapSlug: mapAccess.mapSlug, matchedMaps: mapAccess.matchedMaps, allowedMaps: mapAccess.allowedMaps, reason: "hwid_mismatch", message: "This key is already linked to another device." };
   }
 
   const timestamp = nowIso();
@@ -2046,12 +2291,17 @@ function verifyLocalScriptAccess(req, url, body = {}) {
     key,
     discordId,
     hwidHash,
+    mapContext,
+    mapSlug: mapAccess.mapSlug,
+    matchedMaps: mapAccess.matchedMaps,
+    allowedMaps: mapAccess.allowedMaps,
     reason: "bound_hwid_local",
     message: "Key linked to this device.",
     license: {
       license_key: license.key,
       discord_id: discordId,
       product_id: license.productId || "",
+      allowed_maps: mapAccess.allowedMaps,
       status: "active",
       max_devices: maxDevices,
       hwid_hash: hwidHash,
@@ -2146,6 +2396,12 @@ async function handleScriptAuth(req, res, url) {
     reason: access.reason,
     message: access.message,
     sourceUrl: `${publicBaseUrl(req)}/api/script/source`,
+    map: {
+      current: access.mapSlug || "",
+      matched: access.matchedMaps || [],
+      allowed: access.allowedMaps || [],
+      allowedNames: mapNamesForSlugs(access.allowedMaps || []),
+    },
     license: publicScriptLicense(access.license),
   });
 }
@@ -2505,6 +2761,18 @@ async function handleApi(req, res, url) {
       const license = store.keys.find((item) => item.key === key);
 
       if (!license) {
+        if (supabaseConfigured()) {
+          try {
+            const rows = await supabaseRequest(`script_licenses?license_key=eq.${postgrestValue(key)}&select=*&limit=1`);
+            const scriptLicense = Array.isArray(rows) ? rows[0] : null;
+            if (scriptLicense) {
+              sendJson(res, 200, { ok: true, license: publicScriptLicense(scriptLicense), backend: "supabase" });
+              return;
+            }
+          } catch (error) {
+            console.warn(`Script key verify lookup failed: ${error.message}`);
+          }
+        }
         sendJson(res, 404, { ok: false, status: "missing", error: "License key not found" });
         return;
       }
@@ -2565,6 +2833,7 @@ async function handleApi(req, res, url) {
         productId: plan.productId || null,
         categorySlug: plan.categorySlug || null,
         categoryName: plan.categoryName || null,
+        allowedMaps: normalizeAllowedMaps(plan.allowedMaps),
         amount: plan.price,
         currency: plan.currency,
         amountSatang: priceSatang,
@@ -2811,12 +3080,20 @@ async function handleAdminApi(req, res, pathname) {
     return;
   }
 
+  if (req.method === "GET" && pathname === "/api/admin/script-maps") {
+    sendJson(res, 200, { ok: true, maps: scriptMapOptions() });
+    return;
+  }
+
   if (req.method === "POST" && pathname === "/api/admin/script-keys") {
     const body = await readBody(req);
     const discordId = normalizeDiscordId(body.discordId || body.id);
     const productId = String(body.productId || "shora-hub-v1").trim();
     const durationDays = Number(body.durationDays || 30);
     const maxDevices = Math.max(1, Math.min(10, Number(body.maxDevices || 1)));
+    const product = findProduct(productId, store);
+    const requestedMaps = normalizeAllowedMaps(body.allowedMaps);
+    const allowedMaps = requestedMaps.length ? requestedMaps : allowedMapsForProduct(product);
 
     if (!discordId) {
       sendJson(res, 400, { ok: false, error: "Discord ID is required" });
@@ -2837,6 +3114,7 @@ async function handleAdminApi(req, res, pathname) {
                 license_key: key,
                 discord_id: discordId,
                 product_id: productId,
+                allowed_maps: allowedMaps,
                 status: "active",
                 max_devices: maxDevices,
                 expires_at: scriptExpiresAt(durationDays),

@@ -1967,6 +1967,10 @@ h2 {
   justify-content: flex-end;
 }
 
+.admin-product-form > .script-map-hints {
+  grid-column: 1 / -1;
+}
+
 .admin-inline-check {
   grid-column: 1 / -1;
   width: fit-content;
