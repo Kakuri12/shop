@@ -926,9 +926,17 @@ function sanitizeVoucherHash(value) {
   return /^[A-Za-z0-9]{16,80}$/.test(hash) ? hash : "";
 }
 
-function walletForUser(store, user) {
+function walletForUser(store, user, options = {}) {
   const userId = String(user.id);
   if (!store.wallets[userId]) {
+    const wallet = {
+      userId,
+      balanceSatang: 0,
+      currency: "THB",
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    if (options.create === false) return wallet;
     store.wallets[userId] = {
       userId,
       balanceSatang: 0,
@@ -2199,8 +2207,7 @@ async function handleApi(req, res, url) {
       const session = requireSession(req, res);
       if (!session) return;
       const store = await readBackendStore();
-      const wallet = walletForUser(store, session.user);
-      await saveBackendStore(store);
+      const wallet = walletForUser(store, session.user, { create: false });
       sendJson(res, 200, {
         ok: true,
         wallet: publicWallet(wallet),

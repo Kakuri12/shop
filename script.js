@@ -426,36 +426,57 @@ async function openCheckout(productId) {
     return;
   }
 
+  const modal = ensureCheckoutModal();
+  const result = modal.querySelector("#checkoutResult");
+  const submitButton = modal.querySelector("#checkoutSubmit");
+  const terms = modal.querySelector("#checkoutTerms");
+  const form = modal.querySelector("#checkoutForm");
+  const priceSatang = Math.round(Number(product.price || 0) * 100);
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  modal.dataset.checkoutRequestId = requestId;
+  modal.dataset.walletBalanceSatang = "0";
+  modal.dataset.productPriceSatang = String(priceSatang);
+  modal.querySelector("#checkoutProductId").value = product.id;
+  modal.querySelector("#checkoutProductName").textContent = product.name;
+  modal.querySelector("#checkoutProductPrice").textContent = money(product.price);
+  modal.querySelector("#checkoutAccountName").textContent = "กำลังโหลด...";
+  modal.querySelector("#checkoutWalletBalance").textContent = "กำลังโหลด...";
+  modal.querySelector("#checkoutWalletAfter").textContent = "กำลังโหลด...";
+  if (form) form.dataset.completed = "false";
+  if (terms) terms.checked = false;
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "กำลังตรวจสอบเครดิต...";
+  }
+  result.className = "checkout-result show";
+  result.textContent = "กำลังตรวจสอบบัญชีและยอดเครดิต...";
+  modal.hidden = false;
+  modal.querySelector(".checkout-dialog")?.classList.add("is-visible");
+
   let sessionData;
   let walletData;
   try {
-    sessionData = await apiJson("/api/session");
+    [sessionData, walletData] = await Promise.all([apiJson("/api/session"), apiJson("/api/wallet")]);
+    if (modal.dataset.checkoutRequestId !== requestId) return;
+
     if (!sessionData.authenticated || !sessionData.user) {
-      showToast("กรุณาเข้าสู่ระบบด้วย Discord ก่อนซื้อ");
-      window.location.href = "/auth/discord";
+      result.className = "checkout-result show error";
+      result.innerHTML = `กรุณาเข้าสู่ระบบด้วย Discord ก่อนซื้อ <a href="/auth/discord">เข้าสู่ระบบ</a>`;
       return;
     }
-    walletData = await apiJson("/api/wallet");
   } catch (error) {
-    showToast(error.message || "กรุณาเข้าสู่ระบบก่อนซื้อ");
-    window.location.href = "/auth/discord";
+    if (modal.dataset.checkoutRequestId !== requestId) return;
+    result.className = "checkout-result show error";
+    result.innerHTML = `${escapeHtml(error.message || "กรุณาเข้าสู่ระบบก่อนซื้อ")} <a href="/auth/discord">เข้าสู่ระบบ</a>`;
     return;
   }
 
   const user = sessionData.user;
   const displayName = user.displayName || user.globalName || user.username || "Discord";
   const balanceSatang = Number(walletData.wallet?.balanceSatang || 0);
-  const priceSatang = Math.round(Number(product.price || 0) * 100);
   const balanceAfterSatang = balanceSatang - priceSatang;
-  const modal = ensureCheckoutModal();
-  const result = modal.querySelector("#checkoutResult");
-  const submitButton = modal.querySelector("#checkoutSubmit");
-  const terms = modal.querySelector("#checkoutTerms");
-  const form = modal.querySelector("#checkoutForm");
 
-  modal.querySelector("#checkoutProductId").value = product.id;
-  modal.querySelector("#checkoutProductName").textContent = product.name;
-  modal.querySelector("#checkoutProductPrice").textContent = money(product.price);
   modal.querySelector("#checkoutAccountName").textContent = displayName;
   modal.querySelector("#checkoutWalletBalance").textContent = formatBaht(walletData.wallet?.balance || 0);
   modal.querySelector("#checkoutWalletAfter").textContent =
@@ -471,8 +492,6 @@ async function openCheckout(productId) {
     result.innerHTML = `เครดิตไม่พอสำหรับสินค้านี้ <a href="/topup">ไปเติมเงิน</a>`;
   }
   syncCheckoutSubmit(modal);
-  modal.hidden = false;
-  modal.querySelector(".checkout-dialog")?.classList.add("is-visible");
   terms?.focus();
 }
 
