@@ -26,6 +26,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || process.env.SCRIPT_API_BASE_URL || "").replace(/\/+$/, "");
 const SCRIPT_SOURCE_URL = process.env.SCRIPT_SOURCE_URL || "";
 const SCRIPT_SOURCE_FILE = process.env.SCRIPT_SOURCE_FILE || "scripts/source.lua";
+const SCRIPT_SOURCE_DEFAULT_ID = "main";
 const SCRIPT_KEY_PREFIX = (process.env.SCRIPT_KEY_PREFIX || "SHORA").toUpperCase().replace(/[^A-Z0-9]/g, "") || "SHORA";
 const SCRIPT_PASS_PRODUCT_ID = "shora-pass";
 const STORE_CACHE_TTL_MS = Math.max(0, Number(process.env.STORE_CACHE_TTL_MS || 3000));
@@ -1989,24 +1990,44 @@ function ensureInsideRoot(filePath) {
 }
 
 function scriptSourcePath() {
-  return ensureInsideRoot(SCRIPT_SOURCE_FILE);
+  return scriptSourceFilePath(SCRIPT_SOURCE_DEFAULT_ID);
 }
 
-function ensureScriptSourceDir() {
-  fs.mkdirSync(path.dirname(scriptSourcePath()), { recursive: true });
+function normalizeScriptSourceId(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "default" || raw === SCRIPT_SOURCE_DEFAULT_ID) return SCRIPT_SOURCE_DEFAULT_ID;
+  const slug = normalizeScriptMapSlug(raw);
+  if (scriptMapSlugSet().has(slug)) return slug;
+  return "";
 }
 
-function readScriptSource() {
-  const sourcePath = scriptSourcePath();
+function scriptSourceFilePath(sourceId = SCRIPT_SOURCE_DEFAULT_ID) {
+  const normalizedId = normalizeScriptSourceId(sourceId) || SCRIPT_SOURCE_DEFAULT_ID;
+  const filePath = normalizedId === SCRIPT_SOURCE_DEFAULT_ID ? SCRIPT_SOURCE_FILE : path.join("scripts", `${normalizedId}.lua`);
+  return ensureInsideRoot(filePath);
+}
+
+function scriptSourceStorePath(sourceId = SCRIPT_SOURCE_DEFAULT_ID) {
+  return `supabase:shora_script_sources/${sourceId}`;
+}
+
+function ensureScriptSourceDir(sourceId = SCRIPT_SOURCE_DEFAULT_ID) {
+  fs.mkdirSync(path.dirname(scriptSourceFilePath(sourceId)), { recursive: true });
+}
+
+function readScriptSource(sourceId = SCRIPT_SOURCE_DEFAULT_ID) {
+  const normalizedId = normalizeScriptSourceId(sourceId) || SCRIPT_SOURCE_DEFAULT_ID;
+  const sourcePath = scriptSourceFilePath(normalizedId);
   if (fs.existsSync(sourcePath)) {
     const source = fs.readFileSync(sourcePath, "utf8");
     if (source.trim()) {
-      return { source, path: sourcePath, kind: "file" };
+      return { id: normalizedId, source, path: sourcePath, kind: "file" };
     }
   }
 
-  if (SCRIPT_SOURCE_URL) {
+  if (normalizedId === SCRIPT_SOURCE_DEFAULT_ID && SCRIPT_SOURCE_URL) {
     return {
+      id: normalizedId,
       source: `loadstring(game:HttpGet("${SCRIPT_SOURCE_URL.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"))()\n`,
       path: sourcePath,
       kind: "remote_fallback",
@@ -2014,26 +2035,33 @@ function readScriptSource() {
   }
 
   return {
-    source: 'warn("Shora source is empty. Paste source in Admin > Script source.")\nreturn\n',
+    id: normalizedId,
+    source: normalizedId === SCRIPT_SOURCE_DEFAULT_ID ? 'warn("Shora source is empty. Paste source in Admin > Script source.")\nreturn\n' : "",
     path: sourcePath,
     kind: "empty",
   };
 }
 
-function writeScriptSource(source) {
-  ensureScriptSourceDir();
-  fs.writeFileSync(scriptSourcePath(), String(source || ""), "utf8");
+function writeScriptSource(source, sourceId = SCRIPT_SOURCE_DEFAULT_ID) {
+  ensureScriptSourceDir(sourceId);
+  fs.writeFileSync(scriptSourceFilePath(sourceId), String(source || ""), "utf8");
 }
 
-async function readBackendScriptSource() {
+async function readBackendScriptSource(sourceId = SCRIPT_SOURCE_DEFAULT_ID, options = {}) {
+  const normalizedId = normalizeScriptSourceId(sourceId);
+  if (!normalizedId) throw new Error("Invalid script source target.");
+  const fallbackToMain = options.fallbackToMain !== false;
+  const allowFileFallback = options.allowFileFallback !== false;
+
   if (supabaseConfigured()) {
     try {
-      const rows = await supabaseRequest("shora_script_sources?id=eq.main&select=*");
+      const rows = await supabaseRequest(`shora_script_sources?id=eq.${postgrestValue(normalizedId)}&select=*`);
       const row = Array.isArray(rows) ? rows[0] : null;
       if (row && String(row.source || "").trim()) {
         return {
+          id: normalizedId,
           source: row.source,
-          path: "supabase:shora_script_sources/main",
+          path: scriptSourceStorePath(normalizedId),
           kind: row.kind || "database",
         };
       }
@@ -2042,27 +2070,56 @@ async function readBackendScriptSource() {
     }
   }
 
-  return readScriptSource();
+  if (fallbackToMain && normalizedId !== SCRIPT_SOURCE_DEFAULT_ID) {
+    return readBackendScriptSource(SCRIPT_SOURCE_DEFAULT_ID, { fallbackToMain: false, allowFileFallback });
+  }
+
+  if (supabaseConfigured() && !allowFileFallback) {
+    return {
+      id: normalizedId,
+      source: "",
+      path: scriptSourceStorePath(normalizedId),
+      kind: "empty",
+    };
+  }
+
+  return readScriptSource(normalizedId);
 }
 
-async function writeBackendScriptSource(source) {
+async function writeBackendScriptSource(source, sourceId = SCRIPT_SOURCE_DEFAULT_ID) {
+  const normalizedId = normalizeScriptSourceId(sourceId);
+  if (!normalizedId) throw new Error("Invalid script source target.");
   const normalizedSource = String(source || "");
-  writeScriptSource(normalizedSource);
 
-  if (!supabaseConfigured()) return;
+  if (supabaseConfigured()) {
+    await supabaseRequest("shora_script_sources?on_conflict=id", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: [
+        {
+          id: normalizedId,
+          source: normalizedSource,
+          kind: "database",
+          updated_at: nowIso(),
+        },
+      ],
+    });
 
-  await supabaseRequest("shora_script_sources?on_conflict=id", {
-    method: "POST",
-    prefer: "resolution=merge-duplicates,return=minimal",
-    body: [
-      {
-        id: "main",
-        source: normalizedSource,
-        kind: "database",
-        updated_at: nowIso(),
-      },
-    ],
-  });
+    return {
+      id: normalizedId,
+      path: scriptSourceStorePath(normalizedId),
+      kind: "database",
+      bytes: Buffer.byteLength(normalizedSource, "utf8"),
+    };
+  }
+
+  writeScriptSource(normalizedSource, normalizedId);
+  return {
+    id: normalizedId,
+    path: scriptSourceFilePath(normalizedId),
+    kind: "file",
+    bytes: Buffer.byteLength(normalizedSource, "utf8"),
+  };
 }
 
 function luaString(value) {
@@ -2660,7 +2717,7 @@ async function handleScriptSource(req, res, url) {
     return;
   }
 
-  const source = await readBackendScriptSource();
+  const source = await readBackendScriptSource(access.mapSlug || SCRIPT_SOURCE_DEFAULT_ID);
   sendLua(res, 200, source.source);
 }
 
@@ -3466,29 +3523,48 @@ async function handleAdminApi(req, res, pathname) {
   }
 
   if (req.method === "GET" && pathname === "/api/admin/script-source") {
-    const source = await readBackendScriptSource();
+    const adminUrl = new URL(req.url, "http://localhost");
+    const sourceId = normalizeScriptSourceId(adminUrl.searchParams.get("id"));
+    if (!sourceId) {
+      sendJson(res, 400, { ok: false, error: "Invalid script source target" });
+      return;
+    }
+
+    const source = await readBackendScriptSource(sourceId, {
+      fallbackToMain: false,
+      allowFileFallback: sourceId === SCRIPT_SOURCE_DEFAULT_ID,
+    });
     sendJson(res, 200, {
       ok: true,
+      id: source.id,
       source: source.source,
       kind: source.kind,
-      path: path.relative(ROOT_DIR, source.path),
+      path: path.isAbsolute(source.path) ? path.relative(ROOT_DIR, source.path) : source.path,
     });
     return;
   }
 
   if (req.method === "PUT" && pathname === "/api/admin/script-source") {
     const body = await readBody(req);
+    const sourceId = normalizeScriptSourceId(body.id || body.sourceId);
+    if (!sourceId) {
+      sendJson(res, 400, { ok: false, error: "Invalid script source target" });
+      return;
+    }
+
     const source = String(body.source || "");
     if (source.length > 2_000_000) {
       sendJson(res, 400, { ok: false, error: "Source is too large." });
       return;
     }
 
-    await writeBackendScriptSource(source);
+    const saved = await writeBackendScriptSource(source, sourceId);
     sendJson(res, 200, {
       ok: true,
-      path: supabaseConfigured() ? "supabase:shora_script_sources/main" : path.relative(ROOT_DIR, scriptSourcePath()),
-      bytes: Buffer.byteLength(source, "utf8"),
+      id: saved.id,
+      path: path.isAbsolute(saved.path) ? path.relative(ROOT_DIR, saved.path) : saved.path,
+      kind: saved.kind,
+      bytes: saved.bytes,
     });
     return;
   }
