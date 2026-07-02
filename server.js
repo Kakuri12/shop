@@ -1317,6 +1317,11 @@ async function supabaseDeleteMissing(resource, idColumn, nextIds) {
   );
 }
 
+async function syncSupabaseRows(resource, conflictResource, idColumn, rows) {
+  await supabaseDeleteMissing(resource, idColumn, rows.map((row) => row[idColumn]));
+  await supabaseUpsert(conflictResource, rows);
+}
+
 async function saveStoreToSupabase(store) {
   const current = upgradeStore(store);
   const timestamp = nowIso();
@@ -1327,36 +1332,28 @@ async function saveStoreToSupabase(store) {
     source: product.source || "custom",
     updated_at: product.updatedAt || timestamp,
   }));
-  await supabaseDeleteMissing("shora_products", "id", productRows.map((row) => row.id));
-  await supabaseUpsert("shora_products?on_conflict=id", productRows);
 
   const inventoryRows = Object.entries(current.inventory || {}).map(([productId, stock]) => ({
     product_id: productId,
     stock: Math.max(0, Math.round(Number(stock || 0))),
     updated_at: timestamp,
   }));
-  await supabaseDeleteMissing("shora_inventory", "product_id", inventoryRows.map((row) => row.product_id));
-  await supabaseUpsert("shora_inventory?on_conflict=product_id", inventoryRows);
 
   const deletedRows = (current.deletedProductIds || []).map((productId) => ({ product_id: String(productId) }));
-  await supabaseDeleteMissing("shora_deleted_products", "product_id", deletedRows.map((row) => row.product_id));
-  await supabaseUpsert("shora_deleted_products?on_conflict=product_id", deletedRows);
 
-  await supabaseUpsert(
-    "shora_wallets?on_conflict=user_id",
-    Object.values(current.wallets || {}).map((wallet) => ({
+  await Promise.all([
+    syncSupabaseRows("shora_products", "shora_products?on_conflict=id", "id", productRows),
+    syncSupabaseRows("shora_inventory", "shora_inventory?on_conflict=product_id", "product_id", inventoryRows),
+    syncSupabaseRows("shora_deleted_products", "shora_deleted_products?on_conflict=product_id", "product_id", deletedRows),
+    supabaseUpsert("shora_wallets?on_conflict=user_id", Object.values(current.wallets || {}).map((wallet) => ({
       user_id: String(wallet.userId),
       data: wallet,
       balance_satang: Number(wallet.balanceSatang || 0),
       currency: wallet.currency || "THB",
       created_at: wallet.createdAt || timestamp,
       updated_at: wallet.updatedAt || timestamp,
-    })),
-  );
-
-  await supabaseUpsert(
-    "shora_topups?on_conflict=id",
-    current.topups.map((topup) => ({
+    }))),
+    supabaseUpsert("shora_topups?on_conflict=id", current.topups.map((topup) => ({
       id: topup.id,
       user_id: topup.userId || null,
       voucher_hash: topup.voucherHash || null,
@@ -1364,12 +1361,8 @@ async function saveStoreToSupabase(store) {
       amount_satang: Number(topup.amountSatang || 0),
       data: topup,
       created_at: topup.createdAt || timestamp,
-    })),
-  );
-
-  await supabaseUpsert(
-    "shora_orders?on_conflict=id",
-    current.orders.map((order) => ({
+    }))),
+    supabaseUpsert("shora_orders?on_conflict=id", current.orders.map((order) => ({
       id: order.id,
       user_id: order.userId || null,
       contact: order.contact || null,
@@ -1378,20 +1371,16 @@ async function saveStoreToSupabase(store) {
       license_key: order.licenseKey || null,
       data: order,
       created_at: order.createdAt || timestamp,
-    })),
-  );
-
-  await supabaseUpsert(
-    "shora_license_keys?on_conflict=license_key",
-    current.keys.map((license) => ({
+    }))),
+    supabaseUpsert("shora_license_keys?on_conflict=license_key", current.keys.map((license) => ({
       license_key: license.key,
       contact: license.contact || null,
       status: effectiveStatus(license),
       data: license,
       created_at: license.createdAt || timestamp,
       updated_at: license.updatedAt || timestamp,
-    })),
-  );
+    }))),
+  ]);
 }
 
 async function saveBackendStore(store) {
