@@ -19,6 +19,7 @@ const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || `http://localho
 const SESSION_COOKIE = "shora_session";
 const OAUTH_STATE_COOKIE = "shora_discord_state";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
+const SESSION_SECRET = process.env.SESSION_SECRET || ADMIN_TOKEN || DISCORD_CLIENT_SECRET || "local-session-secret";
 const COOKIE_SECURE = process.env.COOKIE_SECURE === "true";
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -26,8 +27,11 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || process.env.SCRIPT_API_B
 const SCRIPT_SOURCE_URL = process.env.SCRIPT_SOURCE_URL || "";
 const SCRIPT_SOURCE_FILE = process.env.SCRIPT_SOURCE_FILE || "scripts/source.lua";
 const SCRIPT_KEY_PREFIX = (process.env.SCRIPT_KEY_PREFIX || "SHORA").toUpperCase().replace(/[^A-Z0-9]/g, "") || "SHORA";
+const SCRIPT_PASS_PRODUCT_ID = "shora-pass";
+const STORE_CACHE_TTL_MS = Math.max(0, Number(process.env.STORE_CACHE_TTL_MS || 3000));
 const sessions = new Map();
 const topupLocks = new Set();
+let backendStoreCache = { expiresAt: 0, store: null };
 
 function loadEnvFile(envPath) {
   if (!fs.existsSync(envPath)) return;
@@ -102,6 +106,38 @@ const categories = [
     description: "Curated premium script bundles and private release keys.",
     image: "/assets/premium-scripts.png",
     itemCount: 5,
+  },
+];
+
+const scriptMaps = [
+  { slug: "blox-fruits", name: "Blox Fruits", keyPrefix: "BF", gameIds: ["994732206"] },
+  { slug: "king-legacy", name: "King Legacy", keyPrefix: "KL", placeIds: ["4520749081", "6381829480", "5931540094", "6596144663", "15759515082"] },
+  { slug: "blade-ball", name: "Blade Ball", keyPrefix: "BB", creatorIds: ["12836673"] },
+  { slug: "anime-fighting-simulator", name: "Anime Fighting Simulator", keyPrefix: "AFS", placeIds: ["6299805723"] },
+  { slug: "rgh", name: "RGH", keyPrefix: "RGH", placeIds: ["914010731"] },
+  { slug: "haze-piece", name: "Haze Piece", keyPrefix: "HAZE", placeIds: ["6918802270", "14979402479"] },
+  { slug: "anime-last-stand", name: "Anime Last Stand", keyPrefix: "ALS", creatorIds: ["12229756"] },
+  { slug: "drive-empire", name: "Drive Empire", keyPrefix: "DE", placeIds: ["3351674303"] },
+  { slug: "sols-rng", name: "Sol's RNG", keyPrefix: "SOL", placeIds: ["15532962292"] },
+  { slug: "attack-on-titan-revolution", name: "Attack on Titan Revolution", keyPrefix: "AOTR", creatorIds: ["17347863"] },
+  { slug: "anime-defenders", name: "Anime Defenders", keyPrefix: "AD", creatorIds: ["34121350"] },
+  { slug: "anime-vanguards", name: "Anime Vanguards", keyPrefix: "AV", creatorIds: ["17219742"] },
+  { slug: "fisch", name: "Fisch", keyPrefix: "FISCH", creatorIds: ["7381705"], placeIds: ["16732694052"] },
+  { slug: "anime-adventures", name: "Anime Adventures", keyPrefix: "AA", creatorIds: ["10611639"] },
+  { slug: "blue-lock", name: "Blue Lock", keyPrefix: "BL", gameIds: ["6325068386"] },
+  { slug: "arise-crossover", name: "Arise Crossover", keyPrefix: "AC", gameIds: ["7074860883"], placeIds: ["87039211657390"] },
+  { slug: "bubble-gum-simulator-infinity", name: "Bubble Gum Simulator Infinity", keyPrefix: "BGS", gameIds: ["7436755782"], creatorIds: ["33720745"] },
+  { slug: "grow-a-garden", name: "Grow a Garden", keyPrefix: "GAG", gameIds: ["9509842868"] },
+  { slug: "all-star-tower-defense-x", name: "All Star Tower Defense X", keyPrefix: "ASTDX", gameIds: ["6057699512"] },
+  { slug: "99-nights-in-the-forest", name: "99 Nights in the Forest", keyPrefix: "N99", gameIds: ["7326934954"] },
+  { slug: "zombie", name: "Zombie", keyPrefix: "ZMB", gameIds: ["7750955984"] },
+  { slug: "fish-it", name: "Fish It", keyPrefix: "FIT", gameIds: ["121864768012064"] },
+  { slug: "build-a-zoo", name: "Build A Zoo", keyPrefix: "BAZ", gameIds: ["8066283370"] },
+  {
+    slug: "misc-supported",
+    name: "Other Supported Maps",
+    keyPrefix: "MSC",
+    gameIds: ["6701277882", "7671049560", "7394964165", "8144728961", "5130394318", "9186719164", "8202280624", "9348272796", "10200395747"],
   },
 ];
 
@@ -378,10 +414,11 @@ function readStore() {
 }
 
 function upgradeStore(store) {
-  if (!store || typeof store !== "object") return { keys: [], orders: [], topups: [], wallets: {}, products: [], inventory: {}, deletedProductIds: [] };
+  if (!store || typeof store !== "object") return { keys: [], orders: [], topups: [], wallets: {}, categories: [], products: [], inventory: {}, deletedProductIds: [] };
   if (!Array.isArray(store.keys)) store.keys = [];
   if (!Array.isArray(store.orders)) store.orders = [];
   if (!Array.isArray(store.topups)) store.topups = [];
+  if (!Array.isArray(store.categories)) store.categories = [];
   if (!Array.isArray(store.products)) store.products = [];
   if (!store.inventory || typeof store.inventory !== "object" || Array.isArray(store.inventory)) store.inventory = {};
   if (!Array.isArray(store.deletedProductIds)) store.deletedProductIds = [];
@@ -495,10 +532,73 @@ function publicDiscordUser(user) {
   };
 }
 
+function base64UrlJson(value) {
+  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+}
+
+function parseBase64UrlJson(value) {
+  return JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+}
+
+function signSessionPayload(encodedPayload) {
+  return crypto.createHmac("sha256", SESSION_SECRET).update(encodedPayload).digest("base64url");
+}
+
+function safeEqualString(left, right) {
+  const leftBuffer = Buffer.from(String(left || ""), "utf8");
+  const rightBuffer = Buffer.from(String(right || ""), "utf8");
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function sessionUser(user) {
+  return {
+    id: String(user.id || ""),
+    username: String(user.username || ""),
+    global_name: String(user.global_name || user.globalName || ""),
+    avatar: user.avatar ? String(user.avatar) : null,
+  };
+}
+
+function createSignedSession(user) {
+  const createdAt = Date.now();
+  const payload = {
+    v: 1,
+    user: sessionUser(user),
+    iat: createdAt,
+    exp: createdAt + SESSION_MAX_AGE_SECONDS * 1000,
+  };
+  const encodedPayload = base64UrlJson(payload);
+  return `v1.${encodedPayload}.${signSessionPayload(encodedPayload)}`;
+}
+
+function readSignedSession(token) {
+  const parts = String(token || "").split(".");
+  if (parts.length !== 3 || parts[0] !== "v1") return null;
+
+  const [, encodedPayload, signature] = parts;
+  if (!safeEqualString(signature, signSessionPayload(encodedPayload))) return null;
+
+  try {
+    const payload = parseBase64UrlJson(encodedPayload);
+    if (!payload || payload.v !== 1 || !payload.user?.id || Number(payload.exp || 0) <= Date.now()) {
+      return null;
+    }
+    return {
+      id: token,
+      user: sessionUser(payload.user),
+      createdAt: Number(payload.iat || 0),
+      expiresAt: Number(payload.exp || 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function createSession(user) {
-  const sessionId = crypto.randomBytes(32).toString("hex");
+  const sessionId = createSignedSession(user);
   sessions.set(sessionId, {
-    user,
+    user: sessionUser(user),
     createdAt: Date.now(),
     expiresAt: Date.now() + SESSION_MAX_AGE_SECONDS * 1000,
   });
@@ -508,6 +608,10 @@ function createSession(user) {
 function sessionFromRequest(req) {
   const sessionId = parseCookies(req)[SESSION_COOKIE];
   if (!sessionId) return null;
+
+  const signedSession = readSignedSession(sessionId);
+  if (signedSession) return signedSession;
+
   const session = sessions.get(sessionId);
   if (!session) return null;
   if (session.expiresAt <= Date.now()) {
@@ -718,16 +822,76 @@ function productWithStock(store, product) {
   };
 }
 
+function visibleCategory(category) {
+  return category && category.hidden !== true && category.status !== "hidden";
+}
+
+function defaultCategorySet() {
+  return new Set(categories.map((category) => category.slug));
+}
+
+function normalizeStoredCategory(category, source = "custom") {
+  const slug = slugify(category?.slug || category?.name || "");
+  if (!slug) return null;
+  return {
+    slug,
+    name: String(category?.name || slug).trim(),
+    description: String(category?.description || "").trim(),
+    image: String(category?.image || "/assets/site-logo.png").trim(),
+    source: category?.source || source,
+    hidden: category?.hidden === true || category?.hidden === "true" || category?.status === "hidden",
+    createdAt: category?.createdAt || null,
+    updatedAt: category?.updatedAt || null,
+  };
+}
+
+function categoryListForStore(store = readStore(), options = {}) {
+  const includeHidden = options.includeHidden === true;
+  const bySlug = new Map(categories.map((category) => [category.slug, normalizeStoredCategory({ ...category, source: "default" }, "default")]));
+
+  (Array.isArray(store?.categories) ? store.categories : []).forEach((category) => {
+    const normalized = normalizeStoredCategory(category);
+    if (!normalized) return;
+    const existing = bySlug.get(normalized.slug);
+    bySlug.set(normalized.slug, {
+      ...(existing || {}),
+      ...normalized,
+      source: existing?.source === "default" ? "default" : normalized.source || "custom",
+      createdAt: normalized.createdAt || existing?.createdAt || null,
+    });
+  });
+
+  return [...bySlug.values()].filter((category) => includeHidden || visibleCategory(category));
+}
+
 function catalogForStore(store = readStore()) {
   const deletedIds = deletedProductSet(store);
+  const categoryList = categoryListForStore(store);
+  const visibleCategorySlugs = new Set(categoryList.map((category) => category.slug));
   const defaultProducts = catalogProducts.filter((product) => !deletedIds.has(product.id));
   const customProducts = Array.isArray(store.products) ? store.products.filter((product) => visibleProduct(product) && !deletedIds.has(product.id)) : [];
-  const products = [...defaultProducts, ...customProducts].map((product) => productWithStock(store, product));
-  const categoryList = categories.map((category) => ({
+  const products = [...defaultProducts, ...customProducts]
+    .filter((product) => visibleCategorySlugs.has(product.categorySlug))
+    .map((product) => productWithStock(store, product));
+  const categoriesWithCounts = categoryList.map((category) => ({
     ...category,
     itemCount: products.filter((product) => product.categorySlug === category.slug).length,
   }));
-  return { categories: categoryList, products };
+  return { categories: categoriesWithCounts, products };
+}
+
+function categoriesForAdmin(store = readStore()) {
+  const catalog = catalogForStore(store);
+  const counts = new Map(catalog.categories.map((category) => [category.slug, category.itemCount]));
+  catalog.products.forEach((product) => {
+    counts.set(product.categorySlug, (counts.get(product.categorySlug) || 0) + 0);
+  });
+
+  return categoryListForStore(store, { includeHidden: true }).map((category) => ({
+    ...category,
+    itemCount: counts.get(category.slug) || 0,
+    default: defaultCategorySet().has(category.slug),
+  }));
 }
 
 function customProductsForAdmin(store = readStore()) {
@@ -741,8 +905,62 @@ function productsForAdmin(store = readStore()) {
   ];
 }
 
+function normalizeScriptMapSlug(value) {
+  const normalized = slugify(String(value || "").trim());
+  if (!normalized || normalized === "all" || normalized === "any") return "";
+  return normalized;
+}
+
+function scriptMapSlugSet() {
+  return new Set(scriptMaps.map((map) => map.slug));
+}
+
+function normalizeAllowedMaps(value) {
+  const known = scriptMapSlugSet();
+  const source = Array.isArray(value) ? value : String(value || "").split(/[\s,]+/);
+  const slugs = source
+    .map(normalizeScriptMapSlug)
+    .filter((slug) => slug && known.has(slug));
+  return [...new Set(slugs)];
+}
+
+function allowedMapsForProduct(product) {
+  return normalizeAllowedMaps(product?.allowedMaps || product?.maps || product?.scriptMaps);
+}
+
+function mapNamesForSlugs(slugs) {
+  const names = new Map(scriptMaps.map((map) => [map.slug, map.name]));
+  return normalizeAllowedMaps(slugs).map((slug) => names.get(slug) || slug);
+}
+
+function cleanKeyPrefix(value, fallback = SCRIPT_KEY_PREFIX) {
+  return String(value || fallback || SCRIPT_KEY_PREFIX)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 8) || fallback || SCRIPT_KEY_PREFIX;
+}
+
+function keyPrefixForAllowedMaps(slugs, fallback = SCRIPT_KEY_PREFIX) {
+  const allowedMaps = normalizeAllowedMaps(slugs);
+  if (allowedMaps.length !== 1) return cleanKeyPrefix(fallback);
+  const map = scriptMaps.find((item) => item.slug === allowedMaps[0]);
+  return cleanKeyPrefix(map?.keyPrefix, fallback);
+}
+
+function scriptMapOptions() {
+  return scriptMaps.map((map) => ({
+    slug: map.slug,
+    name: map.name,
+    keyPrefix: cleanKeyPrefix(map.keyPrefix),
+    gameIds: map.gameIds || [],
+    placeIds: map.placeIds || [],
+    creatorIds: map.creatorIds || [],
+  }));
+}
+
 function adminProduct(product, store, source = "custom") {
   const deleted = isProductDeleted(store, product.id);
+  const allowedMaps = allowedMapsForProduct(product);
   return {
     id: product.id,
     categorySlug: product.categorySlug,
@@ -755,6 +973,8 @@ function adminProduct(product, store, source = "custom") {
     stock: store ? productStockForStore(store, product) : baseProductStock(product),
     image: product.image || "",
     features: Array.isArray(product.features) ? product.features : [],
+    allowedMaps,
+    allowedMapNames: mapNamesForSlugs(allowedMaps),
     source,
     hidden: deleted || product.hidden === true || product.status === "hidden",
     deleted,
@@ -772,9 +992,9 @@ function normalizeProductFeatures(value) {
     .slice(0, 12);
 }
 
-function normalizeAdminProduct(body, existingProduct, usedIds) {
+function normalizeAdminProduct(body, existingProduct, usedIds, store = readStore()) {
   const categorySlug = String(body.categorySlug || existingProduct?.categorySlug || "").trim();
-  const category = categories.find((item) => item.slug === categorySlug);
+  const category = categoryListForStore(store, { includeHidden: true }).find((item) => item.slug === categorySlug);
   if (!category) throw new Error("Invalid category");
 
   const name = String(body.name || existingProduct?.name || "").trim();
@@ -791,6 +1011,7 @@ function normalizeAdminProduct(body, existingProduct, usedIds) {
   const devicesLimit = Math.max(1, Math.min(10, Math.round(Number(body.devicesLimit ?? existingProduct?.devicesLimit ?? 1))));
   const stock = Math.max(0, Math.round(Number(body.stock ?? existingProduct?.stock ?? 35)));
   const features = normalizeProductFeatures(body.features ?? existingProduct?.features);
+  const allowedMaps = normalizeAllowedMaps(body.allowedMaps ?? existingProduct?.allowedMaps ?? "");
   const timestamp = nowIso();
 
   return {
@@ -805,9 +1026,32 @@ function normalizeAdminProduct(body, existingProduct, usedIds) {
     stock,
     image: String(body.image || existingProduct?.image || category.image || "/assets/site-logo.png").trim(),
     features: features.length ? features : ["รับคีย์ทันที", "ใช้งานได้หลังซื้อสำเร็จ"],
+    allowedMaps,
     hidden: body.hidden === true || body.hidden === "true" || existingProduct?.hidden === true,
     source: "admin",
     createdAt: existingProduct?.createdAt || timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function normalizeAdminCategory(body, existingCategory = null, usedSlugs = new Set()) {
+  const name = String(body.name || existingCategory?.name || "").trim();
+  if (!name) throw new Error("Category name is required");
+
+  const requestedSlug = slugify(body.slug || existingCategory?.slug || name);
+  const slug = existingCategory?.slug || requestedSlug || `category-${crypto.randomBytes(4).toString("hex")}`;
+  if (!existingCategory && usedSlugs.has(slug)) throw new Error("Category slug already exists");
+
+  const defaultCategory = categories.find((category) => category.slug === slug);
+  const timestamp = nowIso();
+  return {
+    slug,
+    name,
+    description: String(body.description ?? existingCategory?.description ?? defaultCategory?.description ?? "").trim(),
+    image: String(body.image ?? existingCategory?.image ?? defaultCategory?.image ?? "/assets/site-logo.png").trim(),
+    source: defaultCategory ? "default" : "custom",
+    hidden: body.hidden === true || body.hidden === "true" || existingCategory?.hidden === true,
+    createdAt: existingCategory?.createdAt || timestamp,
     updatedAt: timestamp,
   };
 }
@@ -856,9 +1100,17 @@ function sanitizeVoucherHash(value) {
   return /^[A-Za-z0-9]{16,80}$/.test(hash) ? hash : "";
 }
 
-function walletForUser(store, user) {
+function walletForUser(store, user, options = {}) {
   const userId = String(user.id);
   if (!store.wallets[userId]) {
+    const wallet = {
+      userId,
+      balanceSatang: 0,
+      currency: "THB",
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    if (options.create === false) return wallet;
     store.wallets[userId] = {
       userId,
       balanceSatang: 0,
@@ -902,6 +1154,8 @@ function publicOrder(order) {
     currency: order.currency || "THB",
     status: order.status || "",
     licenseKey: order.licenseKey || "",
+    allowedMaps: normalizeAllowedMaps(order.allowedMaps),
+    allowedMapNames: mapNamesForSlugs(order.allowedMaps),
     createdAt: order.createdAt || null,
   };
 }
@@ -926,7 +1180,7 @@ function publicToolLog(log) {
 function requireSession(req, res) {
   const session = sessionFromRequest(req);
   if (session) return session;
-  sendJson(res, 401, { ok: false, error: "กรุณาเข้าสู่ระบบด้วย Discord ก่อนเติมเงิน" });
+  sendJson(res, 401, { ok: false, error: "กรุณาเข้าสู่ระบบด้วย Discord ก่อนใช้งาน" });
   return null;
 }
 
@@ -1001,11 +1255,12 @@ async function redeemTrueMoneyVoucher(voucherHash) {
 }
 
 function categoryFor(slug, store = readStore()) {
-  return catalogForStore(store).categories.find((category) => category.slug === slug);
+  return categoryListForStore(store, { includeHidden: true }).find((category) => category.slug === slug);
 }
 
 function offerFromProduct(product, store) {
-  const category = store ? categoryFor(product.categorySlug, store) : categories.find((item) => item.slug === product.categorySlug);
+  const category = store ? categoryFor(product.categorySlug, store) : categoryListForStore(readStore(), { includeHidden: true }).find((item) => item.slug === product.categorySlug);
+  const allowedMaps = allowedMapsForProduct(product);
   return {
     id: product.id,
     name: product.name,
@@ -1016,6 +1271,7 @@ function offerFromProduct(product, store) {
     productId: product.id,
     categorySlug: product.categorySlug,
     categoryName: category ? category.name : product.categorySlug,
+    allowedMaps,
   };
 }
 
@@ -1044,6 +1300,8 @@ function publicLicense(license) {
     productId: license.productId || null,
     categorySlug: license.categorySlug || null,
     categoryName: license.categoryName || null,
+    allowedMaps: normalizeAllowedMaps(license.allowedMaps || license.maps),
+    allowedMapNames: mapNamesForSlugs(license.allowedMaps || license.maps),
   };
 }
 
@@ -1063,17 +1321,20 @@ function generateId(prefix) {
   return `${prefix}_${crypto.randomBytes(8).toString("hex")}`;
 }
 
-function generateLicenseKey(existingKeys) {
+function generateLicenseKey(existingKeys, prefix = "XK") {
+  const cleanPrefix = cleanKeyPrefix(prefix, "XK");
   let licenseKey;
   do {
     const bytes = crypto.randomBytes(6).toString("hex").toUpperCase();
-    licenseKey = `XK-${bytes.slice(0, 4)}-${bytes.slice(4, 8)}-${bytes.slice(8, 12)}`;
+    licenseKey = `${cleanPrefix}-${bytes.slice(0, 4)}-${bytes.slice(4, 8)}-${bytes.slice(8, 12)}`;
   } while (existingKeys.has(licenseKey));
   return licenseKey;
 }
 
 function createLicense(store, offer, order, note = "") {
-  const key = generateLicenseKey(new Set(store.keys.map((license) => license.key)));
+  const allowedMaps = normalizeAllowedMaps(offer.allowedMaps);
+  const keyPrefix = keyPrefixForAllowedMaps(allowedMaps, "XK");
+  const key = generateLicenseKey(new Set(store.keys.map((license) => license.key)), keyPrefix);
   const license = {
     key,
     planId: offer.id,
@@ -1088,6 +1349,7 @@ function createLicense(store, offer, order, note = "") {
     contact: order.contact,
     orderId: order.id,
     devicesLimit: offer.devicesLimit,
+    allowedMaps,
     activations: [],
     createdAt: nowIso(),
     expiresAt: addDays(offer.durationDays),
@@ -1139,12 +1401,251 @@ async function supabaseRequest(resource, options = {}) {
   return data;
 }
 
+async function supabaseReadAll(resource) {
+  const data = await supabaseRequest(resource);
+  return Array.isArray(data) ? data : [];
+}
+
+function rowData(row) {
+  return row?.data && typeof row.data === "object" && !Array.isArray(row.data) ? row.data : {};
+}
+
+function storeFromSupabaseRows(rows) {
+  const store = upgradeStore({
+    keys: rows.keys.map((row) => ({ ...rowData(row), key: row.license_key || rowData(row).key })),
+    orders: rows.orders.map((row) => ({ ...rowData(row), id: row.id })),
+    topups: rows.topups.map((row) => ({ ...rowData(row), id: row.id })),
+    wallets: {},
+    categories: rows.categories.map((row) => ({ ...rowData(row), slug: row.slug })),
+    products: rows.products.map((row) => ({ ...rowData(row), id: row.id })),
+    inventory: {},
+    deletedProductIds: rows.deletedProducts.map((row) => row.product_id).filter(Boolean),
+  });
+
+  rows.wallets.forEach((row) => {
+    const wallet = {
+      ...rowData(row),
+      userId: row.user_id || rowData(row).userId,
+      balanceSatang: Number(row.balance_satang ?? rowData(row).balanceSatang ?? 0),
+      currency: row.currency || rowData(row).currency || "THB",
+    };
+    if (wallet.userId) store.wallets[String(wallet.userId)] = wallet;
+  });
+
+  rows.inventory.forEach((row) => {
+    if (row.product_id) store.inventory[row.product_id] = Math.max(0, Math.round(Number(row.stock || 0)));
+  });
+
+  return store;
+}
+
+function cloneStore(store) {
+  return JSON.parse(JSON.stringify(upgradeStore(store)));
+}
+
+function setBackendStoreCache(store) {
+  if (!supabaseConfigured() || STORE_CACHE_TTL_MS <= 0) return;
+  backendStoreCache = {
+    expiresAt: Date.now() + STORE_CACHE_TTL_MS,
+    store: cloneStore(store),
+  };
+}
+
+function getBackendStoreCache() {
+  if (!supabaseConfigured() || STORE_CACHE_TTL_MS <= 0) return null;
+  if (!backendStoreCache.store || backendStoreCache.expiresAt <= Date.now()) return null;
+  return cloneStore(backendStoreCache.store);
+}
+
+async function readStoreFromSupabase() {
+  const [categoriesData, products, inventory, deletedProducts, wallets, topups, orders, keys] = await Promise.all([
+    supabaseReadAll("shora_categories?select=*&order=position.asc,created_at.asc"),
+    supabaseReadAll("shora_products?select=*&order=created_at.asc"),
+    supabaseReadAll("shora_inventory?select=*"),
+    supabaseReadAll("shora_deleted_products?select=*"),
+    supabaseReadAll("shora_wallets?select=*"),
+    supabaseReadAll("shora_topups?select=*&order=created_at.desc"),
+    supabaseReadAll("shora_orders?select=*&order=created_at.desc"),
+    supabaseReadAll("shora_license_keys?select=*&order=created_at.desc"),
+  ]);
+
+  return storeFromSupabaseRows({ categories: categoriesData, products, inventory, deletedProducts, wallets, topups, orders, keys });
+}
+
+async function readBackendStore() {
+  if (!supabaseConfigured()) return readStore();
+
+  const cachedStore = getBackendStoreCache();
+  if (cachedStore) return cachedStore;
+
+  try {
+    const store = await readStoreFromSupabase();
+    setBackendStoreCache(store);
+    return cloneStore(store);
+  } catch (error) {
+    console.warn(`Supabase store read failed, using local fallback: ${error.message}`);
+    return readStore();
+  }
+}
+
+async function supabaseUpsert(resource, rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  await supabaseRequest(resource, {
+    method: "POST",
+    prefer: "resolution=merge-duplicates,return=minimal",
+    body: rows,
+  });
+}
+
+async function supabaseDeleteMissing(resource, idColumn, nextIds) {
+  const existing = await supabaseReadAll(`${resource}?select=${idColumn}`);
+  const next = new Set(nextIds.map(String));
+  const staleIds = existing.map((row) => String(row[idColumn] || "")).filter((id) => id && !next.has(id));
+  await Promise.all(
+    staleIds.map((id) =>
+      supabaseRequest(`${resource}?${idColumn}=eq.${postgrestValue(id)}`, {
+        method: "DELETE",
+        prefer: "return=minimal",
+      }),
+    ),
+  );
+}
+
+async function syncSupabaseRows(resource, conflictResource, idColumn, rows) {
+  await supabaseDeleteMissing(resource, idColumn, rows.map((row) => row[idColumn]));
+  await supabaseUpsert(conflictResource, rows);
+}
+
+async function saveStoreToSupabase(store) {
+  const current = upgradeStore(store);
+  const timestamp = nowIso();
+
+  const categoryRows = categoryListForStore(current, { includeHidden: true })
+    .filter((category) => category.source !== "default" || current.categories.some((item) => item.slug === category.slug))
+    .map((category, index) => ({
+      slug: category.slug,
+      data: category,
+      source: category.source || "custom",
+      hidden: category.hidden === true,
+      position: index,
+      updated_at: category.updatedAt || timestamp,
+    }));
+
+  const productRows = current.products.map((product) => ({
+    id: product.id,
+    data: product,
+    source: product.source || "custom",
+    updated_at: product.updatedAt || timestamp,
+  }));
+
+  const inventoryRows = Object.entries(current.inventory || {}).map(([productId, stock]) => ({
+    product_id: productId,
+    stock: Math.max(0, Math.round(Number(stock || 0))),
+    updated_at: timestamp,
+  }));
+
+  const deletedRows = (current.deletedProductIds || []).map((productId) => ({ product_id: String(productId) }));
+
+  await Promise.all([
+    syncSupabaseRows("shora_categories", "shora_categories?on_conflict=slug", "slug", categoryRows),
+    syncSupabaseRows("shora_products", "shora_products?on_conflict=id", "id", productRows),
+    syncSupabaseRows("shora_inventory", "shora_inventory?on_conflict=product_id", "product_id", inventoryRows),
+    syncSupabaseRows("shora_deleted_products", "shora_deleted_products?on_conflict=product_id", "product_id", deletedRows),
+    supabaseUpsert("shora_wallets?on_conflict=user_id", Object.values(current.wallets || {}).map((wallet) => ({
+      user_id: String(wallet.userId),
+      data: wallet,
+      balance_satang: Number(wallet.balanceSatang || 0),
+      currency: wallet.currency || "THB",
+      created_at: wallet.createdAt || timestamp,
+      updated_at: wallet.updatedAt || timestamp,
+    }))),
+    supabaseUpsert("shora_topups?on_conflict=id", current.topups.map((topup) => ({
+      id: topup.id,
+      user_id: topup.userId || null,
+      voucher_hash: topup.voucherHash || null,
+      status: topup.status || "",
+      amount_satang: Number(topup.amountSatang || 0),
+      data: topup,
+      created_at: topup.createdAt || timestamp,
+    }))),
+    supabaseUpsert("shora_orders?on_conflict=id", current.orders.map((order) => ({
+      id: order.id,
+      user_id: order.userId || null,
+      contact: order.contact || null,
+      status: order.status || "",
+      amount_satang: Number(order.amountSatang || amountToSatang(order.amount || 0)),
+      license_key: order.licenseKey || null,
+      data: order,
+      created_at: order.createdAt || timestamp,
+    }))),
+    supabaseUpsert("shora_license_keys?on_conflict=license_key", current.keys.map((license) => ({
+      license_key: license.key,
+      contact: license.contact || null,
+      status: effectiveStatus(license),
+      data: license,
+      created_at: license.createdAt || timestamp,
+      updated_at: license.updatedAt || timestamp,
+    }))),
+  ]);
+}
+
+async function saveBackendStore(store) {
+  saveStore(store);
+  if (!supabaseConfigured()) return;
+
+  try {
+    await saveStoreToSupabase(store);
+    setBackendStoreCache(store);
+  } catch (error) {
+    console.warn(`Supabase store write failed, local backup saved: ${error.message}`);
+    throw error;
+  }
+}
+
 function postgrestValue(value) {
   return encodeURIComponent(String(value ?? ""));
 }
 
 function scriptLicenseSelect(key, discordId) {
   return `script_licenses?license_key=eq.${postgrestValue(key)}&discord_id=eq.${postgrestValue(discordId)}&select=*`;
+}
+
+function scriptLicensesForDiscordSelect(discordId) {
+  return `script_licenses?discord_id=eq.${postgrestValue(discordId)}&select=*&order=created_at.asc`;
+}
+
+function isScriptPassLicense(license) {
+  return String(license?.product_id || license?.productId || "") === SCRIPT_PASS_PRODUCT_ID;
+}
+
+function scriptLicenseIsActive(license) {
+  if (!license || license.status !== "active") return false;
+  const expiresAt = license.expires_at || license.expiresAt;
+  return !expiresAt || new Date(expiresAt).getTime() >= Date.now();
+}
+
+function mergeAllowedMaps(...values) {
+  const normalizedSets = values.map((value) => normalizeAllowedMaps(value));
+  if (normalizedSets.some((maps) => maps.length === 0)) return [];
+  return [...new Set(normalizedSets.flat())];
+}
+
+function allowedMapsFromActiveEntitlements(licenses, fallbackMaps = []) {
+  const activeEntitlements = (Array.isArray(licenses) ? licenses : [])
+    .filter((license) => !isScriptPassLicense(license))
+    .filter(scriptLicenseIsActive);
+
+  if (!activeEntitlements.length) return normalizeAllowedMaps(fallbackMaps);
+  return mergeAllowedMaps(...activeEntitlements.map((license) => license.allowed_maps || license.allowedMaps));
+}
+
+function publicScriptPassLicense(passLicense, effectiveAllowedMaps = null) {
+  const allowedMaps = effectiveAllowedMaps ? normalizeAllowedMaps(effectiveAllowedMaps) : normalizeAllowedMaps(passLicense?.allowed_maps || passLicense?.allowedMaps);
+  return publicScriptLicense({
+    ...passLicense,
+    product_id: SCRIPT_PASS_PRODUCT_ID,
+    allowed_maps: allowedMaps,
+  });
 }
 
 function normalizeDiscordId(value) {
@@ -1159,7 +1660,8 @@ function hashHwid(value) {
   return crypto.createHash("sha256").update(normalizeHwid(value)).digest("hex");
 }
 
-function generateScriptKey() {
+function generateScriptKey(prefix = SCRIPT_KEY_PREFIX) {
+  const cleanPrefix = cleanKeyPrefix(prefix, SCRIPT_KEY_PREFIX);
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const groups = [4, 4, 5, 4, 5, 4].map((size) => {
     let part = "";
@@ -1168,22 +1670,103 @@ function generateScriptKey() {
     }
     return part;
   });
-  return `${SCRIPT_KEY_PREFIX}-${groups.join("-")}`;
+  return `${cleanPrefix}-${groups.join("-")}`;
+}
+
+async function createSupabaseScriptLicense(body, prefix = SCRIPT_KEY_PREFIX) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const key = generateScriptKey(prefix);
+    try {
+      const inserted = await supabaseRequest("script_licenses", {
+        method: "POST",
+        prefer: "return=representation",
+        body: {
+          ...body,
+          license_key: key,
+        },
+      });
+      return Array.isArray(inserted) ? inserted[0] : null;
+    } catch (error) {
+      lastError = error;
+      if (!/duplicate|unique/i.test(error.message) || attempt === 7) throw error;
+    }
+  }
+  throw lastError || new Error("Script key could not be created.");
+}
+
+async function ensureAccountPassLicense(discordId, options = {}) {
+  const normalizedDiscordId = normalizeDiscordId(discordId);
+  if (!supabaseConfigured() || !normalizedDiscordId) return null;
+
+  const requestedMaps = normalizeAllowedMaps(options.allowedMaps);
+  const rows = await supabaseRequest(scriptLicensesForDiscordSelect(normalizedDiscordId));
+  const licenses = Array.isArray(rows) ? rows : [];
+  const passLicense = licenses.find(isScriptPassLicense) || null;
+  const entitlementMaps = allowedMapsFromActiveEntitlements(licenses, requestedMaps);
+  const allowedMaps = mergeAllowedMaps(entitlementMaps, requestedMaps);
+  const maxDevices = Math.max(
+    1,
+    Number(options.maxDevices || 1),
+    ...licenses.map((license) => Number(license.max_devices || 1)).filter(Number.isFinite),
+  );
+  const note = String(options.note || "Shora account pass").trim();
+
+  if (passLicense) {
+    const updated = await supabaseRequest(`script_licenses?id=eq.${postgrestValue(passLicense.id)}`, {
+      method: "PATCH",
+      prefer: "return=representation",
+      body: {
+        product_id: SCRIPT_PASS_PRODUCT_ID,
+        allowed_maps: allowedMaps,
+        status: "active",
+        max_devices: maxDevices,
+        expires_at: null,
+        note,
+        updated_at: nowIso(),
+      },
+    });
+    return Array.isArray(updated) ? updated[0] : null;
+  }
+
+  return createSupabaseScriptLicense(
+    {
+      discord_id: normalizedDiscordId,
+      product_id: SCRIPT_PASS_PRODUCT_ID,
+      allowed_maps: allowedMaps,
+      status: "active",
+      max_devices: maxDevices,
+      expires_at: null,
+      note,
+      created_by: options.createdBy || "pass",
+    },
+    SCRIPT_KEY_PREFIX,
+  );
 }
 
 function publicScriptLicense(license) {
   const isExpired = license.expires_at && new Date(license.expires_at).getTime() < Date.now();
+  const allowedMaps = normalizeAllowedMaps(license.allowed_maps || license.allowedMaps);
+  const isPass = isScriptPassLicense(license);
   return {
     key: license.license_key,
+    planName: isPass ? "Shora Pass" : license.product_id ? `Script: ${license.product_id}` : "Script License",
+    planId: license.product_id || "",
     discordId: license.discord_id,
     productId: license.product_id || "",
     status: isExpired && license.status === "active" ? "expired" : license.status,
     maxDevices: license.max_devices,
+    devicesLimit: license.max_devices,
+    devicesUsed: license.hwid_hash ? 1 : 0,
     hwidBound: Boolean(license.hwid_hash),
     hwidBoundAt: license.hwid_bound_at,
     createdAt: license.created_at,
     expiresAt: license.expires_at,
     note: license.note || "",
+    allowedMaps,
+    allowedMapNames: mapNamesForSlugs(allowedMaps),
+    pass: isPass,
+    script: true,
   };
 }
 
@@ -1191,18 +1774,24 @@ function publicLocalScriptLicense(license) {
   const discordId = String(license.contact || "").startsWith("discord:") ? String(license.contact).slice("discord:".length) : "";
   const activation = Array.isArray(license.activations) ? license.activations[0] : null;
   const status = effectiveStatus(license);
+  const allowedMaps = normalizeAllowedMaps(license.allowedMaps || license.maps);
   return {
     key: license.key,
     discordId,
     productId: license.productId || license.planId || "",
     status,
     maxDevices: Number(license.devicesLimit || 1),
+    devicesLimit: Number(license.devicesLimit || 1),
+    devicesUsed: Array.isArray(license.activations) ? license.activations.length : 0,
     hwidBound: Boolean(activation?.hwidHash || activation?.deviceId),
     hwidBoundAt: activation?.firstSeenAt || activation?.activatedAt || null,
     createdAt: license.createdAt,
     expiresAt: license.expiresAt,
     note: license.note || "",
+    allowedMaps,
+    allowedMapNames: mapNamesForSlugs(allowedMaps),
     backend: "local",
+    script: true,
   };
 }
 
@@ -1218,16 +1807,19 @@ function createLocalScriptLicenseForAdmin(store, body) {
   const productId = String(body.productId || "shora-hub-v1").trim();
   const durationDays = Number(body.durationDays || 30);
   const maxDevices = Math.max(1, Math.min(10, Number(body.maxDevices || 1)));
+  const product = findProduct(productId, store);
+  const requestedMaps = normalizeAllowedMaps(body.allowedMaps);
+  const allowedMaps = requestedMaps.length ? requestedMaps : allowedMapsForProduct(product);
+  const keyPrefix = keyPrefixForAllowedMaps(allowedMaps, SCRIPT_KEY_PREFIX);
 
   if (!discordId) {
     throw new Error("Discord ID is required");
   }
 
-  const product = findProduct(productId, store);
   const keySet = new Set(store.keys.map((license) => license.key));
   let key = "";
   do {
-    key = generateScriptKey();
+    key = generateScriptKey(keyPrefix);
   } while (keySet.has(key));
 
   const license = {
@@ -1244,6 +1836,7 @@ function createLocalScriptLicenseForAdmin(store, body) {
     contact: `discord:${discordId}`,
     orderId: null,
     devicesLimit: maxDevices,
+    allowedMaps,
     activations: [],
     createdAt: nowIso(),
     expiresAt: scriptExpiresAt(durationDays),
@@ -1265,6 +1858,94 @@ function requestIp(req) {
   return forwarded || req.socket.remoteAddress || "";
 }
 
+function normalizeRuntimeId(value) {
+  return String(value || "").replace(/[^\d]/g, "");
+}
+
+function scriptRuntimeContext(url, body = {}) {
+  return {
+    gameId: normalizeRuntimeId(body.gameId || body.game_id || url.searchParams.get("gameId") || url.searchParams.get("game_id")),
+    placeId: normalizeRuntimeId(body.placeId || body.place_id || url.searchParams.get("placeId") || url.searchParams.get("place_id")),
+    creatorId: normalizeRuntimeId(body.creatorId || body.creator_id || url.searchParams.get("creatorId") || url.searchParams.get("creator_id")),
+  };
+}
+
+function idMatches(list, value) {
+  return Boolean(value && Array.isArray(list) && list.map(String).includes(String(value)));
+}
+
+function matchedScriptMaps(context) {
+  if (!context?.gameId && !context?.placeId && !context?.creatorId) return [];
+  return scriptMaps.filter((map) =>
+    idMatches(map.gameIds, context.gameId) ||
+    idMatches(map.placeIds, context.placeId) ||
+    idMatches(map.creatorIds, context.creatorId),
+  );
+}
+
+function scriptMapAccessForLicense(license, context) {
+  const allowedMaps = normalizeAllowedMaps(license?.allowed_maps || license?.allowedMaps || license?.maps);
+  const matchedMaps = matchedScriptMaps(context);
+  const matchedSlugs = matchedMaps.map((map) => map.slug);
+
+  if (!allowedMaps.length) {
+    return {
+      allowed: true,
+      allowedAllMaps: true,
+      allowedMaps,
+      matchedMaps: matchedSlugs,
+      mapSlug: matchedSlugs[0] || "",
+      reason: "all_maps",
+    };
+  }
+
+  if (!context?.gameId && !context?.placeId && !context?.creatorId) {
+    return {
+      allowed: false,
+      allowedAllMaps: false,
+      allowedMaps,
+      matchedMaps: matchedSlugs,
+      mapSlug: "",
+      reason: "missing_map_context",
+      message: "Missing Roblox map information.",
+    };
+  }
+
+  if (!matchedSlugs.length) {
+    return {
+      allowed: false,
+      allowedAllMaps: false,
+      allowedMaps,
+      matchedMaps: matchedSlugs,
+      mapSlug: "",
+      reason: "unknown_map",
+      message: "This map is not registered in Shora Hub.",
+    };
+  }
+
+  const matchedAllowed = matchedSlugs.find((slug) => allowedMaps.includes(slug));
+  if (!matchedAllowed) {
+    return {
+      allowed: false,
+      allowedAllMaps: false,
+      allowedMaps,
+      matchedMaps: matchedSlugs,
+      mapSlug: matchedSlugs[0] || "",
+      reason: "map_not_allowed",
+      message: "This key does not include access to this map.",
+    };
+  }
+
+  return {
+    allowed: true,
+    allowedAllMaps: false,
+    allowedMaps,
+    matchedMaps: matchedSlugs,
+    mapSlug: matchedAllowed,
+    reason: "map_allowed",
+  };
+}
+
 async function logScriptAuthAttempt(req, payload) {
   if (!supabaseConfigured()) return;
   try {
@@ -1277,6 +1958,10 @@ async function logScriptAuthAttempt(req, payload) {
         hwid_hash: payload.hwidHash || null,
         allowed: Boolean(payload.allowed),
         reason: payload.reason || "",
+        map_slug: payload.mapSlug || null,
+        game_id: payload.mapContext?.gameId || null,
+        place_id: payload.mapContext?.placeId || null,
+        creator_id: payload.mapContext?.creatorId || null,
         ip_text: requestIp(req),
         user_agent: String(req.headers["user-agent"] || "").slice(0, 500),
       },
@@ -1340,6 +2025,46 @@ function writeScriptSource(source) {
   fs.writeFileSync(scriptSourcePath(), String(source || ""), "utf8");
 }
 
+async function readBackendScriptSource() {
+  if (supabaseConfigured()) {
+    try {
+      const rows = await supabaseRequest("shora_script_sources?id=eq.main&select=*");
+      const row = Array.isArray(rows) ? rows[0] : null;
+      if (row && String(row.source || "").trim()) {
+        return {
+          source: row.source,
+          path: "supabase:shora_script_sources/main",
+          kind: row.kind || "database",
+        };
+      }
+    } catch (error) {
+      console.warn(`Supabase script source read failed, using file fallback: ${error.message}`);
+    }
+  }
+
+  return readScriptSource();
+}
+
+async function writeBackendScriptSource(source) {
+  const normalizedSource = String(source || "");
+  writeScriptSource(normalizedSource);
+
+  if (!supabaseConfigured()) return;
+
+  await supabaseRequest("shora_script_sources?on_conflict=id", {
+    method: "POST",
+    prefer: "resolution=merge-duplicates,return=minimal",
+    body: [
+      {
+        id: "main",
+        source: normalizedSource,
+        kind: "database",
+        updated_at: nowIso(),
+      },
+    ],
+  });
+}
+
 function luaString(value) {
   return String(value || "")
     .replace(/\\/g, "\\\\")
@@ -1362,26 +2087,32 @@ function buildScriptLoaderSnippet(key, discordId, req) {
 
 async function createScriptLicenseForCheckout(license, order, user) {
   if (!supabaseConfigured()) return null;
+  const allowedMaps = normalizeAllowedMaps(license.allowedMaps || order.allowedMaps);
+  const keyPrefix = keyPrefixForAllowedMaps(allowedMaps, SCRIPT_KEY_PREFIX);
 
   try {
-    const inserted = await supabaseRequest("script_licenses", {
-      method: "POST",
-      prefer: "return=representation",
-      body: {
-        license_key: license.key,
+    await createSupabaseScriptLicense(
+      {
         discord_id: String(user.id),
         product_id: license.productId || order.productId || order.planId || "shora-hub",
+        allowed_maps: allowedMaps,
         status: "active",
         max_devices: Math.max(1, Number(license.devicesLimit || 1)),
         expires_at: license.expiresAt || null,
-        note: `Issued from checkout order ${order.id}`,
+        note: `Entitlement from checkout order ${order.id}`,
         created_by: "checkout",
       },
-    });
+      keyPrefix,
+    );
 
-    return Array.isArray(inserted) ? inserted[0] : null;
+    return ensureAccountPassLicense(user.id, {
+      allowedMaps,
+      maxDevices: license.devicesLimit,
+      note: `Shora Pass updated from order ${order.id}`,
+      createdBy: "checkout",
+    });
   } catch (error) {
-    console.warn(`Supabase script license insert failed, using local key fallback: ${error.message}`);
+    console.warn(`Supabase script pass update failed, using local key fallback: ${error.message}`);
     return null;
   }
 }
@@ -1413,6 +2144,9 @@ local function getHWID()
 end
 
 local hwid = getHWID()
+local GameId = tostring(game.GameId or "")
+local PlaceId = tostring(game.PlaceId or "")
+local CreatorId = tostring(game.CreatorId or "")
 local requestFn = (syn and syn.request) or (http and http.request) or http_request or request
 local response
 
@@ -1425,12 +2159,15 @@ if requestFn then
       key = Key,
       discordId = DiscordId,
       id = DiscordId,
-      hwid = hwid
+      hwid = hwid,
+      gameId = GameId,
+      placeId = PlaceId,
+      creatorId = CreatorId
     })
   })
 else
   response = {
-    Body = game:HttpGet("${sourceUrl}?key=" .. HttpService:UrlEncode(Key) .. "&id=" .. HttpService:UrlEncode(DiscordId) .. "&hwid=" .. HttpService:UrlEncode(hwid))
+    Body = game:HttpGet("${sourceUrl}?key=" .. HttpService:UrlEncode(Key) .. "&id=" .. HttpService:UrlEncode(DiscordId) .. "&hwid=" .. HttpService:UrlEncode(hwid) .. "&gameId=" .. HttpService:UrlEncode(GameId) .. "&placeId=" .. HttpService:UrlEncode(PlaceId) .. "&creatorId=" .. HttpService:UrlEncode(CreatorId))
   }
 end
 
@@ -1497,17 +2234,18 @@ async function verifyScriptAccess(req, url, body = {}) {
   const discordId = normalizeDiscordId(body.discordId || body.id || url.searchParams.get("discordId") || url.searchParams.get("id"));
   const hwid = normalizeHwid(body.hwid || body.hwidId || url.searchParams.get("hwid"));
   const hwidHash = hwid ? hashHwid(hwid) : "";
+  const mapContext = scriptRuntimeContext(url, body);
 
   if (!key || key.length < 12) {
-    return { allowed: false, status: 400, key, discordId, hwidHash, reason: "missing_key", message: "Missing or invalid key." };
+    return { allowed: false, status: 400, key, discordId, hwidHash, mapContext, reason: "missing_key", message: "Missing or invalid key." };
   }
 
   if (!discordId) {
-    return { allowed: false, status: 400, key, discordId, hwidHash, reason: "missing_discord_id", message: "Missing Discord ID." };
+    return { allowed: false, status: 400, key, discordId, hwidHash, mapContext, reason: "missing_discord_id", message: "Missing Discord ID." };
   }
 
   if (!hwid) {
-    return { allowed: false, status: 400, key, discordId, hwidHash, reason: "missing_hwid", message: "Missing HWID." };
+    return { allowed: false, status: 400, key, discordId, hwidHash, mapContext, reason: "missing_hwid", message: "Missing HWID." };
   }
 
   try {
@@ -1515,15 +2253,41 @@ async function verifyScriptAccess(req, url, body = {}) {
     const license = Array.isArray(rows) ? rows[0] : null;
 
     if (!license) {
-      return { allowed: false, status: 404, key, discordId, hwidHash, reason: "invalid_key", message: "Key or Discord ID is incorrect." };
+      return { allowed: false, status: 404, key, discordId, hwidHash, mapContext, reason: "invalid_key", message: "Key or Discord ID is incorrect." };
     }
 
     if (license.status !== "active") {
-      return { allowed: false, status: 403, key, discordId, hwidHash, reason: "key_not_active", message: "This key is not active." };
+      return { allowed: false, status: 403, key, discordId, hwidHash, mapContext, reason: "key_not_active", message: "This key is not active." };
     }
 
     if (license.expires_at && new Date(license.expires_at).getTime() < Date.now()) {
-      return { allowed: false, status: 403, key, discordId, hwidHash, reason: "key_expired", message: "This key has expired." };
+      return { allowed: false, status: 403, key, discordId, hwidHash, mapContext, reason: "key_expired", message: "This key has expired." };
+    }
+
+    let effectiveAllowedMaps = normalizeAllowedMaps(license.allowed_maps);
+    let licenseForAccess = license;
+    if (isScriptPassLicense(license)) {
+      const allLicenses = await supabaseRequest(scriptLicensesForDiscordSelect(discordId));
+      effectiveAllowedMaps = allowedMapsFromActiveEntitlements(allLicenses, license.allowed_maps);
+      licenseForAccess = { ...license, allowed_maps: effectiveAllowedMaps };
+    }
+
+    const mapAccess = scriptMapAccessForLicense(licenseForAccess, mapContext);
+    if (!mapAccess.allowed) {
+      return {
+        allowed: false,
+        status: 403,
+        key,
+        discordId,
+        hwidHash,
+        mapContext,
+        mapSlug: mapAccess.mapSlug,
+        matchedMaps: mapAccess.matchedMaps,
+        allowedMaps: mapAccess.allowedMaps,
+        reason: mapAccess.reason,
+        message: mapAccess.message,
+        license: licenseForAccess,
+      };
     }
 
     let boundNow = false;
@@ -1552,7 +2316,11 @@ async function verifyScriptAccess(req, url, body = {}) {
     }
 
     if (currentLicense.hwid_hash !== hwidHash) {
-      return { allowed: false, status: 403, key, discordId, hwidHash, reason: "hwid_mismatch", message: "This key is already linked to another device." };
+      return { allowed: false, status: 403, key, discordId, hwidHash, mapContext, mapSlug: mapAccess.mapSlug, matchedMaps: mapAccess.matchedMaps, allowedMaps: mapAccess.allowedMaps, reason: "hwid_mismatch", message: "This key is already linked to another device." };
+    }
+
+    if (isScriptPassLicense(currentLicense)) {
+      currentLicense = { ...currentLicense, allowed_maps: effectiveAllowedMaps };
     }
 
     return {
@@ -1561,6 +2329,10 @@ async function verifyScriptAccess(req, url, body = {}) {
       key,
       discordId,
       hwidHash,
+      mapContext,
+      mapSlug: mapAccess.mapSlug,
+      matchedMaps: mapAccess.matchedMaps,
+      allowedMaps: mapAccess.allowedMaps,
       reason: boundNow ? "bound_hwid" : "ok",
       message: boundNow ? "Key linked to this device." : "Key accepted.",
       license: currentLicense,
@@ -1576,28 +2348,47 @@ function verifyLocalScriptAccess(req, url, body = {}) {
   const discordId = normalizeDiscordId(body.discordId || body.id || url.searchParams.get("discordId") || url.searchParams.get("id"));
   const hwid = normalizeHwid(body.hwid || body.hwidId || url.searchParams.get("hwid"));
   const hwidHash = hwid ? hashHwid(hwid) : "";
+  const mapContext = scriptRuntimeContext(url, body);
 
   if (!key || key.length < 12) {
-    return { allowed: false, status: 400, key, discordId, hwidHash, reason: "missing_key", message: "Missing or invalid key." };
+    return { allowed: false, status: 400, key, discordId, hwidHash, mapContext, reason: "missing_key", message: "Missing or invalid key." };
   }
 
   if (!discordId) {
-    return { allowed: false, status: 400, key, discordId, hwidHash, reason: "missing_discord_id", message: "Missing Discord ID." };
+    return { allowed: false, status: 400, key, discordId, hwidHash, mapContext, reason: "missing_discord_id", message: "Missing Discord ID." };
   }
 
   if (!hwid) {
-    return { allowed: false, status: 400, key, discordId, hwidHash, reason: "missing_hwid", message: "Missing HWID." };
+    return { allowed: false, status: 400, key, discordId, hwidHash, mapContext, reason: "missing_hwid", message: "Missing HWID." };
   }
 
   const store = readStore();
   const license = store.keys.find((item) => item.key === key);
   if (!license || license.contact !== `discord:${discordId}`) {
-    return { allowed: false, status: 404, key, discordId, hwidHash, reason: "invalid_key", message: "Key or Discord ID is incorrect." };
+    return { allowed: false, status: 404, key, discordId, hwidHash, mapContext, reason: "invalid_key", message: "Key or Discord ID is incorrect." };
   }
 
   const status = effectiveStatus(license);
   if (status !== "active") {
-    return { allowed: false, status: 403, key, discordId, hwidHash, reason: `key_${status}`, message: "This key is not active." };
+    return { allowed: false, status: 403, key, discordId, hwidHash, mapContext, reason: `key_${status}`, message: "This key is not active." };
+  }
+
+  const mapAccess = scriptMapAccessForLicense(license, mapContext);
+  if (!mapAccess.allowed) {
+    return {
+      allowed: false,
+      status: 403,
+      key,
+      discordId,
+      hwidHash,
+      mapContext,
+      mapSlug: mapAccess.mapSlug,
+      matchedMaps: mapAccess.matchedMaps,
+      allowedMaps: mapAccess.allowedMaps,
+      reason: mapAccess.reason,
+      message: mapAccess.message,
+      license,
+    };
   }
 
   if (!Array.isArray(license.activations)) license.activations = [];
@@ -1613,12 +2404,17 @@ function verifyLocalScriptAccess(req, url, body = {}) {
       key,
       discordId,
       hwidHash,
+      mapContext,
+      mapSlug: mapAccess.mapSlug,
+      matchedMaps: mapAccess.matchedMaps,
+      allowedMaps: mapAccess.allowedMaps,
       reason: "ok_local",
       message: "Key accepted.",
       license: {
         license_key: license.key,
         discord_id: discordId,
         product_id: license.productId || "",
+        allowed_maps: mapAccess.allowedMaps,
         status: "active",
         max_devices: maxDevices,
         hwid_hash: hwidHash,
@@ -1631,7 +2427,7 @@ function verifyLocalScriptAccess(req, url, body = {}) {
   }
 
   if (license.activations.length >= maxDevices) {
-    return { allowed: false, status: 403, key, discordId, hwidHash, reason: "hwid_mismatch", message: "This key is already linked to another device." };
+    return { allowed: false, status: 403, key, discordId, hwidHash, mapContext, mapSlug: mapAccess.mapSlug, matchedMaps: mapAccess.matchedMaps, allowedMaps: mapAccess.allowedMaps, reason: "hwid_mismatch", message: "This key is already linked to another device." };
   }
 
   const timestamp = nowIso();
@@ -1644,12 +2440,17 @@ function verifyLocalScriptAccess(req, url, body = {}) {
     key,
     discordId,
     hwidHash,
+    mapContext,
+    mapSlug: mapAccess.mapSlug,
+    matchedMaps: mapAccess.matchedMaps,
+    allowedMaps: mapAccess.allowedMaps,
     reason: "bound_hwid_local",
     message: "Key linked to this device.",
     license: {
       license_key: license.key,
       discord_id: discordId,
       product_id: license.productId || "",
+      allowed_maps: mapAccess.allowedMaps,
       status: "active",
       max_devices: maxDevices,
       hwid_hash: hwidHash,
@@ -1659,6 +2460,168 @@ function verifyLocalScriptAccess(req, url, body = {}) {
       note: license.note || "",
     },
   };
+}
+
+function localScriptLicenseForUser(store, key, discordId) {
+  return store.keys.find((license) => {
+    const contact = String(license.contact || "");
+    return license.key === key && contact === `discord:${discordId}`;
+  });
+}
+
+function scriptLicenseUnavailableMessage(license) {
+  if (!license) return "ไม่พบคีย์นี้ในบัญชี Discord ของคุณ";
+  if (license.status === "expired") return "คีย์นี้หมดอายุแล้ว";
+  if (license.status !== "active") return "คีย์นี้ยังไม่พร้อมใช้งาน";
+  return "";
+}
+
+async function findUserScriptLicense(key, discordId, store = readStore()) {
+  const normalizedKey = normalizeKey(key);
+  const normalizedDiscordId = normalizeDiscordId(discordId);
+
+  if (!normalizedKey || normalizedKey.length < 12) {
+    return { error: { status: 400, message: "กรุณากรอก License Key ให้ถูกต้อง" } };
+  }
+
+  if (!normalizedDiscordId) {
+    return { error: { status: 400, message: "ไม่พบ Discord ID ของผู้ใช้" } };
+  }
+
+  if (supabaseConfigured()) {
+    try {
+      const rows = await supabaseRequest(scriptLicenseSelect(normalizedKey, normalizedDiscordId));
+      const license = Array.isArray(rows) ? rows[0] : null;
+      if (license) {
+        let resolvedLicense = license;
+        if (!isScriptPassLicense(license)) {
+          const passLicense = await ensureAccountPassLicense(normalizedDiscordId, {
+            allowedMaps: license.allowed_maps,
+            maxDevices: license.max_devices,
+            note: `Shora Pass linked from ${license.license_key}`,
+            createdBy: "tool",
+          });
+          if (passLicense) resolvedLicense = passLicense;
+        }
+        return {
+          backend: "supabase",
+          key: resolvedLicense.license_key,
+          discordId: normalizedDiscordId,
+          license: resolvedLicense,
+          publicLicense: isScriptPassLicense(resolvedLicense) ? publicScriptPassLicense(resolvedLicense) : publicScriptLicense(resolvedLicense),
+        };
+      }
+    } catch (error) {
+      console.warn(`User script license Supabase lookup failed, using local fallback: ${error.message}`);
+    }
+  }
+
+  const localLicense = localScriptLicenseForUser(store, normalizedKey, normalizedDiscordId);
+  if (!localLicense) return null;
+
+  return {
+    backend: "local",
+    key: normalizedKey,
+    discordId: normalizedDiscordId,
+    license: localLicense,
+    publicLicense: publicLocalScriptLicense(localLicense),
+  };
+}
+
+function scriptToolPayload(record, req) {
+  return {
+    license: record.publicLicense,
+    script: {
+      loader: buildScriptLoaderSnippet(record.key, record.discordId, req),
+      loaderUrl: `${publicBaseUrl(req)}/loader.lua`,
+      backend: record.backend,
+    },
+  };
+}
+
+function publicScriptEntitlement(license) {
+  const publicLicense = isScriptPassLicense(license) ? publicScriptPassLicense(license) : publicScriptLicense(license);
+  return {
+    key: publicLicense.key,
+    productId: publicLicense.productId,
+    planName: publicLicense.planName,
+    status: publicLicense.status,
+    expiresAt: publicLicense.expiresAt,
+    allowedMaps: publicLicense.allowedMaps,
+    allowedMapNames: publicLicense.allowedMapNames,
+    active: scriptLicenseIsActive(license),
+    pass: publicLicense.pass,
+  };
+}
+
+async function userScriptAccount(discordId, store = readStore()) {
+  const normalizedDiscordId = normalizeDiscordId(discordId);
+
+  if (supabaseConfigured()) {
+    const rows = await supabaseRequest(scriptLicensesForDiscordSelect(normalizedDiscordId));
+    const licenses = Array.isArray(rows) ? rows : [];
+    const entitlements = licenses.filter((license) => !isScriptPassLicense(license));
+    const activeEntitlements = entitlements.filter(scriptLicenseIsActive);
+    let passLicense = licenses.find(isScriptPassLicense) || null;
+
+    let allowedMaps = [];
+    if (activeEntitlements.length) {
+      allowedMaps = mergeAllowedMaps(...activeEntitlements.map((license) => license.allowed_maps));
+    } else if (passLicense && scriptLicenseIsActive(passLicense)) {
+      allowedMaps = normalizeAllowedMaps(passLicense.allowed_maps);
+    }
+
+    if (activeEntitlements.length) {
+      passLicense = await ensureAccountPassLicense(normalizedDiscordId, {
+        allowedMaps,
+        maxDevices: Math.max(1, ...activeEntitlements.map((license) => Number(license.max_devices || 1)).filter(Number.isFinite)),
+        note: "Shora Pass synced from License Center",
+        createdBy: "account",
+      }) || passLicense;
+    }
+
+    const hasAccess = Boolean((passLicense && scriptLicenseIsActive(passLicense)) || activeEntitlements.length);
+    return {
+      backend: "supabase",
+      hasAccess,
+      pass: passLicense && hasAccess ? publicScriptPassLicense(passLicense, allowedMaps) : null,
+      allowedMaps: hasAccess ? allowedMaps : [],
+      allowedMapNames: hasAccess ? mapNamesForSlugs(allowedMaps) : [],
+      entitlements: entitlements.map(publicScriptEntitlement),
+      totalEntitlements: entitlements.length,
+    };
+  }
+
+  const localLicenses = store.keys.filter((license) => String(license.contact || "") === `discord:${normalizedDiscordId}`);
+  const activeLicenses = localLicenses.filter((license) => effectiveStatus(license) === "active");
+  const passLicense = activeLicenses.find((license) => license.productId === SCRIPT_PASS_PRODUCT_ID || String(license.key || "").startsWith(`${SCRIPT_KEY_PREFIX}-`)) || null;
+  const allowedMaps = activeLicenses.length ? mergeAllowedMaps(...activeLicenses.map((license) => license.allowedMaps)) : [];
+
+  return {
+    backend: "local",
+    hasAccess: activeLicenses.length > 0,
+    pass: passLicense ? publicLocalScriptLicense({ ...passLicense, allowedMaps }) : null,
+    allowedMaps: activeLicenses.length ? allowedMaps : [],
+    allowedMapNames: activeLicenses.length ? mapNamesForSlugs(allowedMaps) : [],
+    entitlements: localLicenses.map((license) => ({
+      ...publicLocalScriptLicense(license),
+      active: effectiveStatus(license) === "active",
+    })),
+    totalEntitlements: localLicenses.length,
+  };
+}
+
+async function handleScriptAccount(req, res) {
+  const session = requireSession(req, res);
+  if (!session) return;
+
+  const store = await readBackendStore();
+  const account = await userScriptAccount(session.user.id, store);
+  sendJson(res, 200, {
+    ok: true,
+    user: publicDiscordUser(session.user),
+    ...account,
+  });
 }
 
 async function handleScriptAuth(req, res, url) {
@@ -1677,6 +2640,12 @@ async function handleScriptAuth(req, res, url) {
     reason: access.reason,
     message: access.message,
     sourceUrl: `${publicBaseUrl(req)}/api/script/source`,
+    map: {
+      current: access.mapSlug || "",
+      matched: access.matchedMaps || [],
+      allowed: access.allowedMaps || [],
+      allowedNames: mapNamesForSlugs(access.allowedMaps || []),
+    },
     license: publicScriptLicense(access.license),
   });
 }
@@ -1691,8 +2660,106 @@ async function handleScriptSource(req, res, url) {
     return;
   }
 
-  const source = readScriptSource();
+  const source = await readBackendScriptSource();
   sendLua(res, 200, source.source);
+}
+
+async function handleScriptLoaderTool(req, res) {
+  const session = requireSession(req, res);
+  if (!session) return;
+
+  const body = await readBody(req);
+  const store = await readBackendStore();
+  const record = await findUserScriptLicense(body.key, session.user.id, store);
+
+  if (record?.error) {
+    sendJson(res, record.error.status, { ok: false, error: record.error.message });
+    return;
+  }
+
+  if (!record) {
+    sendJson(res, 404, { ok: false, error: "ไม่พบคีย์นี้ในบัญชี Discord ของคุณ" });
+    return;
+  }
+
+  const unavailableMessage = scriptLicenseUnavailableMessage(record.publicLicense);
+  if (unavailableMessage) {
+    sendJson(res, 403, { ok: false, error: unavailableMessage, license: record.publicLicense });
+    return;
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    ...scriptToolPayload(record, req),
+  });
+}
+
+async function handleScriptResetDevice(req, res) {
+  const session = requireSession(req, res);
+  if (!session) return;
+
+  const body = await readBody(req);
+  const store = await readBackendStore();
+  const record = await findUserScriptLicense(body.key, session.user.id, store);
+
+  if (record?.error) {
+    sendJson(res, record.error.status, { ok: false, error: record.error.message });
+    return;
+  }
+
+  if (!record) {
+    sendJson(res, 404, { ok: false, error: "ไม่พบคีย์นี้ในบัญชี Discord ของคุณ" });
+    return;
+  }
+
+  const unavailableMessage = scriptLicenseUnavailableMessage(record.publicLicense);
+  if (unavailableMessage) {
+    sendJson(res, 403, { ok: false, error: unavailableMessage, license: record.publicLicense });
+    return;
+  }
+
+  let updatedRecord = record;
+  if (record.backend === "supabase") {
+    const updated = await supabaseRequest(
+      `script_licenses?license_key=eq.${postgrestValue(record.key)}&discord_id=eq.${postgrestValue(record.discordId)}`,
+      {
+        method: "PATCH",
+        prefer: "return=representation",
+        body: {
+          hwid_hash: null,
+          hwid_bound_at: null,
+          updated_at: nowIso(),
+        },
+      },
+    );
+
+    const updatedLicense = Array.isArray(updated) ? updated[0] : null;
+    if (!updatedLicense) {
+      sendJson(res, 404, { ok: false, error: "ไม่พบคีย์สำหรับ Reset Device" });
+      return;
+    }
+
+    updatedRecord = {
+      ...record,
+      license: updatedLicense,
+      publicLicense: publicScriptLicense(updatedLicense),
+    };
+  } else {
+    if (!Array.isArray(record.license.activations)) record.license.activations = [];
+    record.license.activations = [];
+    record.license.updatedAt = nowIso();
+    await saveBackendStore(store);
+    updatedRecord = {
+      ...record,
+      publicLicense: publicLocalScriptLicense(record.license),
+    };
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    message: "Reset Device สำเร็จแล้ว รันสคริปต์อีกครั้งเพื่อผูกเครื่องใหม่",
+    ...scriptToolPayload(updatedRecord, req),
+  });
 }
 
 async function handleApi(req, res, url) {
@@ -1713,6 +2780,21 @@ async function handleApi(req, res, url) {
       return;
     }
 
+    if (req.method === "POST" && pathname === "/api/script/loader") {
+      await handleScriptLoaderTool(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/script/reset-device") {
+      await handleScriptResetDevice(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/script/me") {
+      await handleScriptAccount(req, res);
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/session") {
       const session = sessionFromRequest(req);
       sendJson(res, 200, {
@@ -1723,11 +2805,27 @@ async function handleApi(req, res, url) {
       return;
     }
 
+    if (req.method === "GET" && pathname === "/api/bootstrap") {
+      const session = sessionFromRequest(req);
+      const store = await readBackendStore();
+      const catalog = catalogForStore(store);
+      const wallet = session ? walletForUser(store, session.user, { create: false }) : null;
+
+      sendJson(res, 200, {
+        ok: true,
+        catalog: { categories: catalog.categories, products: catalog.products },
+        authenticated: Boolean(session),
+        user: session ? publicDiscordUser(session.user) : null,
+        wallet: wallet ? publicWallet(wallet) : null,
+      });
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/wallet") {
       const session = requireSession(req, res);
       if (!session) return;
-      const store = readStore();
-      const wallet = walletForUser(store, session.user);
+      const store = await readBackendStore();
+      const wallet = walletForUser(store, session.user, { create: false });
       sendJson(res, 200, {
         ok: true,
         wallet: publicWallet(wallet),
@@ -1739,7 +2837,7 @@ async function handleApi(req, res, url) {
     if (req.method === "GET" && pathname === "/api/topups") {
       const session = requireSession(req, res);
       if (!session) return;
-      const store = readStore();
+      const store = await readBackendStore();
       const topups = store.topups
         .filter((topup) => topup.userId === session.user.id)
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -1753,7 +2851,7 @@ async function handleApi(req, res, url) {
       const session = requireSession(req, res);
       if (!session) return;
 
-      const store = readStore();
+      const store = await readBackendStore();
       const userId = String(session.user.id);
       const orders = store.orders
         .filter((order) => order.userId === userId || order.contact === `discord:${userId}`)
@@ -1804,7 +2902,7 @@ async function handleApi(req, res, url) {
         return;
       }
 
-      let store = readStore();
+      let store = await readBackendStore();
       const usedTopup = store.topups.find((topup) => topup.voucherHash === voucherHash && topup.status === "success");
       if (usedTopup) {
         sendJson(res, 409, { ok: false, error: "ซองอั่งเปานี้ถูกใช้เติมเงินในระบบแล้ว" });
@@ -1814,7 +2912,7 @@ async function handleApi(req, res, url) {
       topupLocks.add(voucherHash);
       try {
         const redeemed = await redeemTrueMoneyVoucher(voucherHash);
-        store = readStore();
+        store = await readBackendStore();
 
         const duplicateAfterRedeem = store.topups.find((topup) => topup.voucherHash === voucherHash && topup.status === "success");
         if (duplicateAfterRedeem) {
@@ -1844,7 +2942,7 @@ async function handleApi(req, res, url) {
         };
 
         store.topups.push(topup);
-        saveStore(store);
+        await saveBackendStore(store);
 
         sendJson(res, 201, {
           ok: true,
@@ -1852,7 +2950,7 @@ async function handleApi(req, res, url) {
           wallet: publicWallet(wallet),
         });
       } catch (error) {
-        store = readStore();
+        store = await readBackendStore();
         store.topups.push({
           id: generateId("topup_failed"),
           provider: "truemoney_angpao",
@@ -1866,7 +2964,7 @@ async function handleApi(req, res, url) {
           displayName: session.user.global_name || session.user.username || "Discord",
           createdAt: nowIso(),
         });
-        saveStore(store);
+        await saveBackendStore(store);
         sendJson(res, 400, { ok: false, error: error.message || "เติมเงินไม่สำเร็จ" });
       } finally {
         topupLocks.delete(voucherHash);
@@ -1880,20 +2978,20 @@ async function handleApi(req, res, url) {
     }
 
     if (req.method === "GET" && pathname === "/api/catalog") {
-      const catalog = catalogForStore(readStore());
+      const catalog = catalogForStore(await readBackendStore());
       sendJson(res, 200, { ok: true, categories: catalog.categories, products: catalog.products });
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/categories") {
-      sendJson(res, 200, { ok: true, categories: catalogForStore(readStore()).categories });
+      sendJson(res, 200, { ok: true, categories: catalogForStore(await readBackendStore()).categories });
       return;
     }
 
     const categoryProductsMatch = pathname.match(/^\/api\/categories\/([^/]+)\/products$/);
     if (req.method === "GET" && categoryProductsMatch) {
       const slug = decodeURIComponent(categoryProductsMatch[1]);
-      const catalog = catalogForStore(readStore());
+      const catalog = catalogForStore(await readBackendStore());
       const category = catalog.categories.find((item) => item.slug === slug);
       if (!category) {
         sendJson(res, 404, { ok: false, error: "Category not found" });
@@ -1908,10 +3006,22 @@ async function handleApi(req, res, url) {
     if (req.method === "POST" && pathname === "/api/keys/verify") {
       const body = await readBody(req);
       const key = normalizeKey(body.key);
-      const store = readStore();
+      const store = await readBackendStore();
       const license = store.keys.find((item) => item.key === key);
 
       if (!license) {
+        if (supabaseConfigured()) {
+          try {
+            const rows = await supabaseRequest(`script_licenses?license_key=eq.${postgrestValue(key)}&select=*&limit=1`);
+            const scriptLicense = Array.isArray(rows) ? rows[0] : null;
+            if (scriptLicense) {
+              sendJson(res, 200, { ok: true, license: publicScriptLicense(scriptLicense), backend: "supabase" });
+              return;
+            }
+          } catch (error) {
+            console.warn(`Script key verify lookup failed: ${error.message}`);
+          }
+        }
         sendJson(res, 404, { ok: false, status: "missing", error: "License key not found" });
         return;
       }
@@ -1925,7 +3035,7 @@ async function handleApi(req, res, url) {
       if (!session) return;
 
       const body = await readBody(req);
-      const store = readStore();
+      const store = await readBackendStore();
       const product = findProduct(body.productId, store);
       const plan = product ? offerFromProduct(product, store) : findPlan(body.planId);
 
@@ -1972,6 +3082,7 @@ async function handleApi(req, res, url) {
         productId: plan.productId || null,
         categorySlug: plan.categorySlug || null,
         categoryName: plan.categoryName || null,
+        allowedMaps: normalizeAllowedMaps(plan.allowedMaps),
         amount: plan.price,
         currency: plan.currency,
         amountSatang: priceSatang,
@@ -1992,8 +3103,19 @@ async function handleApi(req, res, url) {
       if (product) {
         store.inventory[product.id] = Math.max(0, Number(product.stock || 0) - 1);
       }
-      await createScriptLicenseForCheckout(license, order, session.user);
-      saveStore(store);
+      const scriptPass = await createScriptLicenseForCheckout(license, order, session.user);
+      if (scriptPass) {
+        const publicPass = publicScriptPassLicense(scriptPass);
+        license.key = publicPass.key;
+        license.planId = publicPass.planId;
+        license.planName = publicPass.planName;
+        license.productId = publicPass.productId;
+        license.allowedMaps = publicPass.allowedMaps;
+        license.devicesLimit = publicPass.devicesLimit;
+        license.expiresAt = publicPass.expiresAt;
+        order.licenseKey = publicPass.key;
+      }
+      await saveBackendStore(store);
 
       sendJson(res, 201, {
         ok: true,
@@ -2023,7 +3145,7 @@ async function handleApi(req, res, url) {
 }
 
 async function handleAdminApi(req, res, pathname) {
-  const store = readStore();
+  const store = await readBackendStore();
 
   if (req.method === "GET" && pathname === "/api/admin/summary") {
     sendJson(res, 200, { ok: true, summary: summarize(store) });
@@ -2032,23 +3154,94 @@ async function handleAdminApi(req, res, pathname) {
 
   if (req.method === "GET" && pathname === "/api/admin/products") {
     const catalog = catalogForStore(store);
+    const adminCategories = categoriesForAdmin(store);
     sendJson(res, 200, {
       ok: true,
-      categories: catalog.categories,
+      categories: adminCategories,
       products: productsForAdmin(store),
       defaultProducts: catalogProducts.length,
     });
     return;
   }
 
+  if (req.method === "GET" && pathname === "/api/admin/categories") {
+    sendJson(res, 200, { ok: true, categories: categoriesForAdmin(store) });
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/admin/categories") {
+    const body = await readBody(req);
+    const usedSlugs = new Set(categoryListForStore(store, { includeHidden: true }).map((category) => category.slug));
+    const category = normalizeAdminCategory(body, null, usedSlugs);
+    store.categories.push(category);
+    await saveBackendStore(store);
+    sendJson(res, 201, { ok: true, category, categories: categoriesForAdmin(store) });
+    return;
+  }
+
+  const categoryMatch = pathname.match(/^\/api\/admin\/categories\/([^/]+)$/);
+  if (categoryMatch && req.method === "PATCH") {
+    const slug = decodeURIComponent(categoryMatch[1]);
+    const body = await readBody(req);
+    const allCategories = categoryListForStore(store, { includeHidden: true });
+    const existing = allCategories.find((category) => category.slug === slug);
+    if (!existing) {
+      sendJson(res, 404, { ok: false, error: "Category not found" });
+      return;
+    }
+
+    const index = store.categories.findIndex((category) => category.slug === slug);
+    const current = index >= 0 ? store.categories[index] : existing;
+    const category = normalizeAdminCategory({ ...body, slug }, current, new Set(allCategories.filter((item) => item.slug !== slug).map((item) => item.slug)));
+
+    if (body.restore === true || body.hidden === false || body.hidden === "false") category.hidden = false;
+    if (body.hidden === true || body.hidden === "true" || body.deleted === true) category.hidden = true;
+
+    if (index >= 0) {
+      store.categories[index] = category;
+    } else {
+      store.categories.push(category);
+    }
+
+    await saveBackendStore(store);
+    sendJson(res, 200, { ok: true, category, categories: categoriesForAdmin(store) });
+    return;
+  }
+
+  if (categoryMatch && req.method === "DELETE") {
+    const slug = decodeURIComponent(categoryMatch[1]);
+    const defaultSlugs = defaultCategorySet();
+    const index = store.categories.findIndex((category) => category.slug === slug);
+    const existing = categoryListForStore(store, { includeHidden: true }).find((category) => category.slug === slug);
+
+    if (!existing) {
+      sendJson(res, 404, { ok: false, error: "Category not found" });
+      return;
+    }
+
+    if (defaultSlugs.has(slug)) {
+      const category = normalizeAdminCategory({ ...existing, slug, hidden: true }, existing);
+      if (index >= 0) store.categories[index] = category;
+      else store.categories.push(category);
+      await saveBackendStore(store);
+      sendJson(res, 200, { ok: true, category, categories: categoriesForAdmin(store) });
+      return;
+    }
+
+    if (index >= 0) store.categories.splice(index, 1);
+    await saveBackendStore(store);
+    sendJson(res, 200, { ok: true, category: existing, categories: categoriesForAdmin(store) });
+    return;
+  }
+
   if (req.method === "POST" && pathname === "/api/admin/products") {
     const body = await readBody(req);
     const usedIds = new Set([...catalogProducts.map((product) => product.id), ...customProductsForAdmin(store).map((product) => product.id)]);
-    const product = normalizeAdminProduct(body, null, usedIds);
+    const product = normalizeAdminProduct(body, null, usedIds, store);
     store.products.push(product);
     store.inventory[product.id] = product.stock;
-    saveStore(store);
-    sendJson(res, 201, { ok: true, product: adminProduct(product, store), categories: catalogForStore(store).categories });
+    await saveBackendStore(store);
+    sendJson(res, 201, { ok: true, product: adminProduct(product, store), categories: categoriesForAdmin(store) });
     return;
   }
 
@@ -2074,10 +3267,10 @@ async function handleAdminApi(req, res, pathname) {
       }
 
       store.deletedProductIds = [...deletedIds];
-      saveStore(store);
-      sendJson(res, 200, { ok: true, product: adminProduct(defaultProduct, store, "default"), categories: catalogForStore(store).categories });
-      return;
-    }
+      await saveBackendStore(store);
+        sendJson(res, 200, { ok: true, product: adminProduct(defaultProduct, store, "default"), categories: categoriesForAdmin(store) });
+        return;
+      }
 
     if (index === -1) {
       sendJson(res, 404, { ok: false, error: "Product not found or is a default product" });
@@ -2090,12 +3283,12 @@ async function handleAdminApi(req, res, pathname) {
       store.products[index].updatedAt = nowIso();
     } else {
       const usedIds = new Set([...catalogProducts.map((product) => product.id), ...store.products.filter((_, itemIndex) => itemIndex !== index).map((product) => product.id)]);
-      store.products[index] = normalizeAdminProduct(body, store.products[index], usedIds);
+      store.products[index] = normalizeAdminProduct(body, store.products[index], usedIds, store);
       store.inventory[store.products[index].id] = store.products[index].stock;
     }
 
-    saveStore(store);
-    sendJson(res, 200, { ok: true, product: adminProduct(store.products[index], store), categories: catalogForStore(store).categories });
+    await saveBackendStore(store);
+    sendJson(res, 200, { ok: true, product: adminProduct(store.products[index], store), categories: categoriesForAdmin(store) });
     return;
   }
 
@@ -2106,8 +3299,8 @@ async function handleAdminApi(req, res, pathname) {
       const deletedIds = deletedProductSet(store);
       deletedIds.add(productId);
       store.deletedProductIds = [...deletedIds];
-      saveStore(store);
-      sendJson(res, 200, { ok: true, product: adminProduct(defaultProduct, store, "default"), categories: catalogForStore(store).categories });
+      await saveBackendStore(store);
+      sendJson(res, 200, { ok: true, product: adminProduct(defaultProduct, store, "default"), categories: categoriesForAdmin(store) });
       return;
     }
 
@@ -2119,8 +3312,8 @@ async function handleAdminApi(req, res, pathname) {
 
     const [removed] = store.products.splice(index, 1);
     delete store.inventory[productId];
-    saveStore(store);
-    sendJson(res, 200, { ok: true, product: adminProduct(removed, store), categories: catalogForStore(store).categories });
+    await saveBackendStore(store);
+    sendJson(res, 200, { ok: true, product: adminProduct(removed, store), categories: categoriesForAdmin(store) });
     return;
   }
 
@@ -2147,12 +3340,21 @@ async function handleAdminApi(req, res, pathname) {
     return;
   }
 
+  if (req.method === "GET" && pathname === "/api/admin/script-maps") {
+    sendJson(res, 200, { ok: true, maps: scriptMapOptions() });
+    return;
+  }
+
   if (req.method === "POST" && pathname === "/api/admin/script-keys") {
     const body = await readBody(req);
     const discordId = normalizeDiscordId(body.discordId || body.id);
     const productId = String(body.productId || "shora-hub-v1").trim();
     const durationDays = Number(body.durationDays || 30);
     const maxDevices = Math.max(1, Math.min(10, Number(body.maxDevices || 1)));
+    const product = findProduct(productId, store);
+    const requestedMaps = normalizeAllowedMaps(body.allowedMaps);
+    const allowedMaps = requestedMaps.length ? requestedMaps : allowedMapsForProduct(product);
+    const keyPrefix = keyPrefixForAllowedMaps(allowedMaps, SCRIPT_KEY_PREFIX);
 
     if (!discordId) {
       sendJson(res, 400, { ok: false, error: "Discord ID is required" });
@@ -2160,41 +3362,34 @@ async function handleAdminApi(req, res, pathname) {
     }
 
     if (supabaseConfigured()) {
-      let key = "";
-      let created = null;
       try {
-        for (let attempt = 0; attempt < 8; attempt += 1) {
-          key = generateScriptKey();
-          try {
-            const inserted = await supabaseRequest("script_licenses", {
-              method: "POST",
-              prefer: "return=representation",
-              body: {
-                license_key: key,
-                discord_id: discordId,
-                product_id: productId,
-                status: "active",
-                max_devices: maxDevices,
-                expires_at: scriptExpiresAt(durationDays),
-                note: String(body.note || "").trim(),
-                created_by: "admin",
-              },
-            });
-            created = Array.isArray(inserted) ? inserted[0] : null;
-            break;
-          } catch (error) {
-            if (!/duplicate|unique/i.test(error.message) || attempt === 7) throw error;
-          }
-        }
-
-        if (!created) {
-          throw new Error("Script key was created but Supabase did not return the row.");
-        }
+        const entitlement = await createSupabaseScriptLicense(
+          {
+            discord_id: discordId,
+            product_id: productId,
+            allowed_maps: allowedMaps,
+            status: "active",
+            max_devices: maxDevices,
+            expires_at: scriptExpiresAt(durationDays),
+            note: String(body.note || "").trim(),
+            created_by: "admin",
+          },
+          keyPrefix,
+        );
+        const passLicense = await ensureAccountPassLicense(discordId, {
+          allowedMaps,
+          maxDevices,
+          note: `Shora Pass updated from admin issue ${entitlement?.license_key || productId}`,
+          createdBy: "admin",
+        });
+        const publicPass = passLicense ? publicScriptPassLicense(passLicense) : publicScriptLicense(entitlement);
+        const responseKey = publicPass.key || entitlement.license_key;
 
         sendJson(res, 201, {
           ok: true,
-          license: publicScriptLicense(created),
-          loader: buildScriptLoaderSnippet(key, discordId, req),
+          license: publicPass,
+          entitlement: entitlement ? publicScriptLicense(entitlement) : null,
+          loader: buildScriptLoaderSnippet(responseKey, discordId, req),
           backend: "supabase",
         });
         return;
@@ -2204,7 +3399,7 @@ async function handleAdminApi(req, res, pathname) {
     }
 
     const localLicense = createLocalScriptLicenseForAdmin(store, body);
-    saveStore(store);
+    await saveBackendStore(store);
     sendJson(res, 201, {
       ok: true,
       license: publicLocalScriptLicense(localLicense),
@@ -2265,13 +3460,13 @@ async function handleAdminApi(req, res, pathname) {
     if (nextStatus) localLicense.status = nextStatus;
     if (body.resetHwid === true) localLicense.activations = [];
     localLicense.updatedAt = nowIso();
-    saveStore(store);
+    await saveBackendStore(store);
     sendJson(res, 200, { ok: true, license: publicLocalScriptLicense(localLicense), backend: "local" });
     return;
   }
 
   if (req.method === "GET" && pathname === "/api/admin/script-source") {
-    const source = readScriptSource();
+    const source = await readBackendScriptSource();
     sendJson(res, 200, {
       ok: true,
       source: source.source,
@@ -2289,10 +3484,10 @@ async function handleAdminApi(req, res, pathname) {
       return;
     }
 
-    writeScriptSource(source);
+    await writeBackendScriptSource(source);
     sendJson(res, 200, {
       ok: true,
-      path: path.relative(ROOT_DIR, scriptSourcePath()),
+      path: supabaseConfigured() ? "supabase:shora_script_sources/main" : path.relative(ROOT_DIR, scriptSourcePath()),
       bytes: Buffer.byteLength(source, "utf8"),
     });
     return;
@@ -2328,7 +3523,7 @@ async function handleAdminApi(req, res, pathname) {
 
     store.orders.push(order);
     const license = createLicense(store, plan, order, String(body.note || "Issued by admin"));
-    saveStore(store);
+    await saveBackendStore(store);
     sendJson(res, 201, { ok: true, license: adminLicense(license), order });
     return;
   }
@@ -2353,7 +3548,7 @@ async function handleAdminApi(req, res, pathname) {
     license.status = nextStatus;
     license.note = String(body.note || license.note || "");
     license.updatedAt = nowIso();
-    saveStore(store);
+    await saveBackendStore(store);
     sendJson(res, 200, { ok: true, license: adminLicense(license) });
     return;
   }

@@ -1,8 +1,9 @@
 <!doctype html>
-<html lang="th">
+<html lang="th" translate="no" class="notranslate">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="google" content="notranslate" />
     <title>Shora Hub Admin</title>
     <meta name="description" content="Admin panel for Shora Hub store and license management." />
     <link rel="icon" type="image/png" href="/assets/site-logo.png" />
@@ -53,6 +54,7 @@
 
       <section class="admin-tabs" role="tablist" aria-label="Admin sections">
         <button class="active" type="button" data-admin-tab="overview">ภาพรวม</button>
+        <button type="button" data-admin-tab="categories">หมวดหมู่</button>
         <button type="button" data-admin-tab="products">สินค้า</button>
         <button type="button" data-admin-tab="orders">ออเดอร์ / คีย์</button>
         <button type="button" data-admin-tab="scripts">สคริปต์</button>
@@ -71,6 +73,10 @@
               <strong>เพิ่มสินค้า</strong>
               <span>สร้างสินค้าใหม่ ใส่รูป ราคา วันใช้งาน แล้วขึ้นหน้าเว็บทันที</span>
             </button>
+            <button class="admin-quick-card" type="button" data-jump-tab="categories">
+              <strong>จัดการหมวดหมู่</strong>
+              <span>เพิ่มหมวด ลบ/ซ่อนหมวด เปลี่ยนรูปปก และปรับข้อมูลที่โชว์บนหน้าร้าน</span>
+            </button>
             <button class="admin-quick-card" type="button" data-jump-tab="orders">
               <strong>ดูออเดอร์</strong>
               <span>เช็กคำสั่งซื้อ คีย์ที่ออก และสถานะคีย์ของลูกค้า</span>
@@ -81,6 +87,73 @@
             </button>
           </div>
         </article>
+      </section>
+
+      <section class="admin-panel" data-admin-panel="categories" hidden>
+        <div class="admin-section-grid admin-products-stack">
+          <article class="admin-card admin-card-wide">
+            <div class="admin-card-head">
+              <div>
+                <p class="eyebrow">Categories</p>
+                <h3>เพิ่ม / แก้ไขหมวดหมู่</h3>
+              </div>
+            </div>
+            <form class="admin-form admin-category-form" id="categoryForm">
+              <label class="form-field">
+                <span>ชื่อหมวดหมู่</span>
+                <input name="name" type="text" placeholder="Shora Hub V2" required />
+              </label>
+              <label class="form-field">
+                <span>Slug (ไม่ใส่ก็ได้)</span>
+                <input name="slug" type="text" placeholder="shora-hub-v2" />
+              </label>
+              <label class="form-field form-field-wide">
+                <span>รูปหมวดหมู่</span>
+                <input name="image" type="text" placeholder="/assets/xenon-hub-v1.png หรือ https://..." />
+              </label>
+              <label class="form-field form-field-wide">
+                <span>คำอธิบาย</span>
+                <textarea name="description" placeholder="คำอธิบายสั้น ๆ ที่โชว์ใต้ชื่อหมวด"></textarea>
+              </label>
+              <label class="inline-check admin-inline-check">
+                <input name="hidden" type="checkbox" value="true" />
+                <span>ซ่อนหมวดนี้จากหน้าร้าน</span>
+              </label>
+              <div class="source-actions">
+                <button class="button button-primary" type="submit" id="categorySubmit">เพิ่มหมวดหมู่</button>
+                <button class="button button-secondary" type="button" id="cancelCategoryEdit" hidden>ยกเลิกแก้ไข</button>
+              </div>
+            </form>
+          </article>
+
+          <article class="admin-card admin-card-wide">
+            <div class="admin-card-head">
+              <div>
+                <p class="eyebrow">Store categories</p>
+                <h3>หมวดหมู่ทั้งหมด</h3>
+              </div>
+              <span class="admin-count" id="categoryCount">0</span>
+            </div>
+            <p class="source-help">หมวด default จะลบถาวรไม่ได้ แต่กดซ่อนได้ ส่วนหมวดที่เพิ่มเองลบออกจากระบบได้เลย</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>รูป</th>
+                    <th>ชื่อ</th>
+                    <th>Slug</th>
+                    <th>สินค้า</th>
+                    <th>สถานะ</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="categoriesTable">
+                  <tr><td colspan="6" class="empty-state">No categories loaded.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section class="admin-panel" data-admin-panel="products" hidden>
@@ -141,6 +214,11 @@
                 <span>รายละเอียดสินค้า</span>
                 <textarea name="features" placeholder="รับคีย์ทันที&#10;ใช้งาน 30 วัน&#10;รองรับมือถือ"></textarea>
               </label>
+              <label class="form-field form-field-wide">
+                <span>แมพที่ใช้ได้ (เว้นว่าง = ทุกแมพ)</span>
+                <textarea name="allowedMaps" id="productAllowedMaps" placeholder="blox-fruits&#10;king-legacy"></textarea>
+              </label>
+              <p class="source-help script-map-hints">โหลดรายการแมพ...</p>
               <button class="button button-primary" type="submit">เพิ่มสินค้า</button>
             </form>
           </article>
@@ -162,12 +240,13 @@
                     <th>Category</th>
                     <th>Price</th>
                     <th>Stock</th>
+                    <th>Maps</th>
                     <th>Status</th>
                     <th>Action</th>
                   </tr>
                 </thead>
                 <tbody id="productsTable">
-                  <tr><td colspan="6" class="empty-state">No custom products loaded.</td></tr>
+                  <tr><td colspan="7" class="empty-state">No custom products loaded.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -283,6 +362,11 @@
                 <span>Product</span>
                 <input name="productId" type="text" value="shora-hub-v1" />
               </label>
+              <label class="form-field">
+                <span>Maps (เว้นว่าง = ตามสินค้า)</span>
+                <textarea name="allowedMaps" id="scriptAllowedMaps" placeholder="blox-fruits, king-legacy"></textarea>
+              </label>
+              <p class="source-help script-map-hints">โหลดรายการแมพ...</p>
               <div class="admin-form-pair">
                 <label class="form-field">
                   <span>Duration days</span>
@@ -342,12 +426,13 @@
                     <th>Discord</th>
                     <th>Status</th>
                     <th>HWID</th>
+                    <th>Maps</th>
                     <th>Expires</th>
                     <th>Action</th>
                   </tr>
                 </thead>
                 <tbody id="scriptKeysTable">
-                  <tr><td colspan="6" class="empty-state">No script keys loaded.</td></tr>
+                  <tr><td colspan="7" class="empty-state">No script keys loaded.</td></tr>
                 </tbody>
               </table>
             </div>
