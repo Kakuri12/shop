@@ -8,7 +8,12 @@ const scriptKeysTable = document.querySelector("#scriptKeysTable");
 const productForm = document.querySelector("#productForm");
 const productCategory = document.querySelector("#productCategory");
 const productsTable = document.querySelector("#productsTable");
+const categoryForm = document.querySelector("#categoryForm");
+const categorySubmit = document.querySelector("#categorySubmit");
+const cancelCategoryEdit = document.querySelector("#cancelCategoryEdit");
+const categoriesTable = document.querySelector("#categoriesTable");
 const ordersTable = document.querySelector("#ordersTable");
+const categoryCount = document.querySelector("#categoryCount");
 const productCount = document.querySelector("#productCount");
 const keyCount = document.querySelector("#keyCount");
 const orderCount = document.querySelector("#orderCount");
@@ -24,6 +29,7 @@ const scriptSourceMeta = document.querySelector("#scriptSourceMeta");
 const reloadScriptSourceButton = document.querySelector("#reloadScriptSource");
 const toast = document.querySelector("#toast");
 let latestLoaderSnippet = "";
+let latestCategories = [];
 
 const savedToken = localStorage.getItem("shorakey_admin_token") || localStorage.getItem("xenonkey_admin_token");
 if (savedToken) tokenInput.value = savedToken;
@@ -110,9 +116,82 @@ function renderMetrics(summary) {
 
 function renderProductCategoryOptions(categories) {
   if (!productCategory) return;
-  productCategory.innerHTML = categories
-    .map((category) => `<option value="${escapeHtml(category.slug)}">${escapeHtml(category.name)}</option>`)
+  const visibleCategories = categories.filter((category) => !category.hidden);
+  productCategory.innerHTML = (visibleCategories.length ? visibleCategories : categories)
+    .map((category) => `<option value="${escapeHtml(category.slug)}">${escapeHtml(category.name)}${category.hidden ? " (hidden)" : ""}</option>`)
     .join("");
+}
+
+function resetCategoryForm() {
+  if (!categoryForm) return;
+  categoryForm.reset();
+  delete categoryForm.dataset.editingSlug;
+  const slugInput = categoryForm.querySelector("[name='slug']");
+  const hiddenInput = categoryForm.querySelector("[name='hidden']");
+  if (slugInput) slugInput.disabled = false;
+  if (hiddenInput) hiddenInput.checked = false;
+  if (categorySubmit) categorySubmit.textContent = "เพิ่มหมวดหมู่";
+  if (cancelCategoryEdit) cancelCategoryEdit.hidden = true;
+}
+
+function renderCategoryImage(category) {
+  return category.image
+    ? `<img class="admin-thumb" src="${escapeHtml(category.image)}" alt="" loading="lazy" />`
+    : `<span class="admin-thumb is-empty">-</span>`;
+}
+
+function renderCategories(categories) {
+  if (!categoriesTable) return;
+  latestCategories = Array.isArray(categories) ? categories : [];
+  if (categoryCount) categoryCount.textContent = String(latestCategories.length);
+  renderProductCategoryOptions(latestCategories);
+
+  if (!latestCategories.length) {
+    categoriesTable.innerHTML = '<tr><td colspan="6" class="empty-state">ยังไม่มีหมวดหมู่</td></tr>';
+    return;
+  }
+
+  categoriesTable.innerHTML = latestCategories
+    .map((category) => {
+      const statusText = category.hidden ? "Hidden" : "Active";
+      const statusClass = category.hidden ? "expired" : "active";
+      const sourceText = category.default ? "Default" : "Custom";
+      const actionButtons = `
+        <button class="button button-small button-secondary" type="button" data-edit-category="${escapeHtml(category.slug)}">Edit</button>
+        ${
+          category.hidden
+            ? `<button class="button button-small button-secondary" type="button" data-restore-category="${escapeHtml(category.slug)}">Restore</button>`
+            : `<button class="button button-small button-danger" type="button" data-delete-category="${escapeHtml(category.slug)}">${category.default ? "Hide" : "Delete"}</button>`
+        }
+      `;
+
+      return `
+        <tr>
+          <td>${renderCategoryImage(category)}</td>
+          <td>
+            <strong>${escapeHtml(category.name)}</strong><br />
+            <span class="tag ${category.default ? "revoked" : "active"}">${sourceText}</span>
+          </td>
+          <td><code>${escapeHtml(category.slug)}</code></td>
+          <td>${Number(category.itemCount || 0).toLocaleString("th-TH")}</td>
+          <td><span class="tag ${statusClass}">${statusText}</span></td>
+          <td><div class="table-actions">${actionButtons}</div></td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+async function loadCategories() {
+  if (!categoriesTable && !productCategory) return [];
+  try {
+    const data = await adminFetch("/api/admin/categories");
+    renderCategories(data.categories || []);
+    return data.categories || [];
+  } catch (error) {
+    if (categoriesTable) categoriesTable.innerHTML = `<tr><td colspan="6" class="empty-state">${escapeHtml(error.message)}</td></tr>`;
+    return [];
+  }
 }
 
 function productUrl(product) {
@@ -167,7 +246,7 @@ async function loadProducts() {
   if (!productsTable) return;
   try {
     const data = await adminFetch("/api/admin/products");
-    renderProductCategoryOptions(data.categories || []);
+    renderCategories(data.categories || []);
     renderProducts(data.products || [], data.categories || []);
   } catch (error) {
     productsTable.innerHTML = `<tr><td colspan="6" class="empty-state">${escapeHtml(error.message)}</td></tr>`;
@@ -323,7 +402,7 @@ async function loadAdmin() {
     ]);
     renderMetrics(summaryData.summary);
     renderKeys(keyData.keys);
-    renderProductCategoryOptions(productData.categories || []);
+    renderCategories(productData.categories || []);
     renderProducts(productData.products || [], productData.categories || []);
     renderOrders(orderData.orders || []);
     adminStatus.textContent = `Loaded ${keyData.keys.length} keys, ${orderData.orders.length} orders, and ${productData.products.length} custom products.`;
@@ -376,6 +455,94 @@ if (productForm) {
       showToast(error.message);
     } finally {
       submitButton.disabled = false;
+    }
+  });
+}
+
+if (categoryForm) {
+  categoryForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = Object.fromEntries(new FormData(categoryForm).entries());
+    payload.hidden = payload.hidden === "true";
+    const editingSlug = categoryForm.dataset.editingSlug;
+    const submitButton = categoryForm.querySelector("button[type='submit']");
+
+    submitButton.disabled = true;
+    try {
+      const data = await adminFetch(editingSlug ? `/api/admin/categories/${encodeURIComponent(editingSlug)}` : "/api/admin/categories", {
+        method: editingSlug ? "PATCH" : "POST",
+        body: JSON.stringify(payload),
+      });
+      showToast(editingSlug ? `Updated ${data.category.name}` : `Added ${data.category.name}`);
+      resetCategoryForm();
+      renderCategories(data.categories || []);
+      await loadProducts();
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      submitButton.disabled = false;
+    }
+  });
+}
+
+if (cancelCategoryEdit) {
+  cancelCategoryEdit.addEventListener("click", resetCategoryForm);
+}
+
+if (categoriesTable) {
+  categoriesTable.addEventListener("click", async (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+
+    const editSlug = button.dataset.editCategory;
+    if (editSlug) {
+      const category = latestCategories.find((item) => item.slug === editSlug);
+      if (!category || !categoryForm) return;
+      categoryForm.dataset.editingSlug = category.slug;
+      categoryForm.querySelector("[name='name']").value = category.name || "";
+      categoryForm.querySelector("[name='slug']").value = category.slug || "";
+      categoryForm.querySelector("[name='slug']").disabled = true;
+      categoryForm.querySelector("[name='image']").value = category.image || "";
+      categoryForm.querySelector("[name='description']").value = category.description || "";
+      categoryForm.querySelector("[name='hidden']").checked = category.hidden === true;
+      if (categorySubmit) categorySubmit.textContent = "บันทึกหมวดหมู่";
+      if (cancelCategoryEdit) cancelCategoryEdit.hidden = false;
+      categoryForm.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    const restoreSlug = button.dataset.restoreCategory;
+    if (restoreSlug) {
+      try {
+        const data = await adminFetch(`/api/admin/categories/${encodeURIComponent(restoreSlug)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ restore: true, hidden: false }),
+        });
+        showToast(`Restored ${restoreSlug}`);
+        renderCategories(data.categories || []);
+        await loadProducts();
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+
+    const deleteSlug = button.dataset.deleteCategory;
+    if (deleteSlug) {
+      const category = latestCategories.find((item) => item.slug === deleteSlug);
+      const actionText = category?.default ? "ซ่อนหมวด" : "ลบหมวด";
+      if (!confirm(`${actionText} ${deleteSlug}? สินค้าในหมวดนี้จะไม่แสดงบนหน้าร้าน`)) return;
+      try {
+        const data = await adminFetch(`/api/admin/categories/${encodeURIComponent(deleteSlug)}`, {
+          method: "DELETE",
+        });
+        showToast(category?.default ? `Hidden ${deleteSlug}` : `Deleted ${deleteSlug}`);
+        resetCategoryForm();
+        renderCategories(data.categories || []);
+        await loadProducts();
+      } catch (error) {
+        showToast(error.message);
+      }
     }
   });
 }

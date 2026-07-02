@@ -43,8 +43,13 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const coarsePointer = window.matchMedia("(hover: none), (pointer: coarse)");
 const pageTransitionMs = 450;
 const pageTransitionStorageKey = "shora_loader_until";
+const catalogStorageKey = "shora_catalog_cache_v1";
+const catalogStorageMaxAgeMs = 60 * 1000;
 let revealObserver;
 let catalogCache;
+let bootstrapPromise;
+let sessionCache;
+let walletCache;
 
 function money(value) {
   return `฿${Number(value || 0).toLocaleString("th-TH")}`;
@@ -103,6 +108,74 @@ async function apiJson(url, options = {}) {
   return data;
 }
 
+function readStoredCatalog() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(catalogStorageKey) || "null");
+    if (!cached || Date.now() - Number(cached.savedAt || 0) > catalogStorageMaxAgeMs) return null;
+    return withComputedCategoryCounts(cached.catalog);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredCatalog(catalog) {
+  try {
+    localStorage.setItem(catalogStorageKey, JSON.stringify({ savedAt: Date.now(), catalog }));
+  } catch {
+    // Storage can be unavailable in strict/private browser modes.
+  }
+}
+
+function applyBootstrapData(data) {
+  if (data?.catalog) {
+    catalogCache = withComputedCategoryCounts(data.catalog);
+    writeStoredCatalog(catalogCache);
+  }
+
+  if (data && Object.prototype.hasOwnProperty.call(data, "authenticated")) {
+    sessionCache = { ok: true, authenticated: Boolean(data.authenticated), user: data.user || null };
+  }
+
+  if (data?.wallet) {
+    walletCache = { ok: true, wallet: data.wallet, user: data.user || null };
+  }
+
+  return data;
+}
+
+function warmBootstrap() {
+  if (!bootstrapPromise) {
+    bootstrapPromise = apiJson("/api/bootstrap")
+      .then(applyBootstrapData)
+      .catch(() => null);
+  }
+  return bootstrapPromise;
+}
+
+async function getSessionData() {
+  if (sessionCache) return sessionCache;
+  const data = await warmBootstrap();
+  if (sessionCache) return sessionCache;
+  if (data?.authenticated !== undefined) {
+    sessionCache = { ok: true, authenticated: Boolean(data.authenticated), user: data.user || null };
+    return sessionCache;
+  }
+  sessionCache = await apiJson("/api/session");
+  return sessionCache;
+}
+
+async function getWalletData() {
+  if (walletCache) return walletCache;
+  const data = await warmBootstrap();
+  if (walletCache) return walletCache;
+  if (data?.wallet) {
+    walletCache = { ok: true, wallet: data.wallet, user: data.user || sessionCache?.user || null };
+    return walletCache;
+  }
+  walletCache = await apiJson("/api/wallet");
+  return walletCache;
+}
+
 function withComputedCategoryCounts(catalog) {
   const products = Array.isArray(catalog?.products) ? catalog.products : [];
   const categories = Array.isArray(catalog?.categories) ? catalog.categories : [];
@@ -124,6 +197,16 @@ function withComputedCategoryCounts(catalog) {
 
 async function getCatalog() {
   if (catalogCache) return catalogCache;
+
+  const storedCatalog = readStoredCatalog();
+  if (storedCatalog) {
+    catalogCache = storedCatalog;
+    warmBootstrap();
+    return catalogCache;
+  }
+
+  const bootstrapData = await warmBootstrap();
+  if (bootstrapData?.catalog && catalogCache) return catalogCache;
 
   try {
     catalogCache = withComputedCategoryCounts(await apiJson("/api/catalog"));
@@ -457,7 +540,7 @@ async function openCheckout(productId) {
   let sessionData;
   let walletData;
   try {
-    [sessionData, walletData] = await Promise.all([apiJson("/api/session"), apiJson("/api/wallet")]);
+    [sessionData, walletData] = await Promise.all([getSessionData(), getWalletData()]);
     if (modal.dataset.checkoutRequestId !== requestId) return;
 
     if (!sessionData.authenticated || !sessionData.user) {
@@ -539,6 +622,9 @@ async function submitCheckout(event) {
     result.className = "checkout-result show success";
     form.dataset.completed = "true";
     catalogCache = null;
+    bootstrapPromise = null;
+    walletCache = data.wallet ? { ok: true, wallet: data.wallet, user: data.order ? sessionCache?.user : null } : null;
+    warmBootstrap();
   } catch (error) {
     result.className = "checkout-result show error";
     result.textContent = error.message;
@@ -868,7 +954,7 @@ async function loadWallet() {
   try {
     if (content) content.hidden = false;
     if (lock) lock.hidden = true;
-    const session = await apiJson("/api/session");
+    const session = await getSessionData();
 
     if (!session.authenticated || !session.user) {
       if (content) content.hidden = true;
@@ -879,7 +965,7 @@ async function loadWallet() {
     updateWalletCard({ balance: 0, balanceSatang: 0 }, session.user);
 
     try {
-      const data = await apiJson("/api/wallet");
+      const data = await getWalletData();
       updateWalletCard(data.wallet, data.user || session.user);
     } catch (walletError) {
       setTopupResult("error", `โหลดเครดิตไม่สำเร็จ แต่บัญชีล็อกอินอยู่แล้ว ลองรีเฟรชอีกครั้งหากยอดเงินไม่ขึ้น`);
@@ -936,6 +1022,9 @@ function setupTopupForm() {
       });
 
       updateWalletCard(data.wallet);
+      walletCache = { ok: true, wallet: data.wallet, user: sessionCache?.user || data.user || null };
+      bootstrapPromise = null;
+      warmBootstrap();
       input.value = "";
       if (terms) terms.checked = false;
       setTopupResult(
@@ -1198,7 +1287,7 @@ async function setupSessionButton() {
   if (!button) return;
 
   try {
-    const data = await apiJson("/api/session");
+    const data = await getSessionData();
     if (!data.authenticated || !data.user) return;
 
     const user = data.user;
@@ -1239,7 +1328,7 @@ async function setupSessionButton() {
       <a class="account-logout" href="/auth/logout" role="menuitem"><span>ออกจากระบบ</span><span aria-hidden="true">↪</span></a>
     `;
 
-    apiJson("/api/wallet")
+    getWalletData()
       .then((walletData) => {
         const balance = menu.querySelector("[data-account-balance]");
         if (balance) balance.textContent = formatBaht(walletData.wallet?.balance || 0);
@@ -1275,6 +1364,7 @@ async function setupSessionButton() {
 }
 
 async function boot() {
+  warmBootstrap();
   markActiveNav();
   ensureSiteFooter();
   setupSessionButton();

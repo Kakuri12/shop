@@ -1806,7 +1806,7 @@ h2 {
 
 .admin-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin: 16px 0;
   border: 1px solid var(--line);
@@ -1897,7 +1897,7 @@ h2 {
 
 .admin-quick-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
 
@@ -1945,19 +1945,52 @@ h2 {
   gap: 14px;
 }
 
+.admin-category-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .admin-product-form > .form-field,
-.admin-product-form > .admin-form-pair {
+.admin-product-form > .admin-form-pair,
+.admin-category-form > .form-field {
   grid-column: span 2;
 }
 
-.admin-product-form > .form-field-wide {
+.admin-product-form > .form-field-wide,
+.admin-category-form > .form-field-wide {
   grid-column: 1 / -1;
+}
+
+.admin-category-form .source-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+
+.admin-inline-check {
+  grid-column: 1 / -1;
+  width: fit-content;
 }
 
 .admin-product-form > button {
   grid-column: 1 / -1;
   justify-self: end;
   min-width: 220px;
+}
+
+.admin-thumb {
+  width: 82px;
+  height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.admin-thumb.is-empty {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
 }
 
 .loader-preview {
@@ -2602,7 +2635,8 @@ td {
   .admin-section-grid,
   .admin-quick-grid,
   .admin-form-pair,
-  .admin-product-form {
+  .admin-product-form,
+  .admin-category-form {
     display: grid;
     grid-template-columns: 1fr;
     align-items: stretch;
@@ -2611,7 +2645,11 @@ td {
   .admin-product-form > .form-field,
   .admin-product-form > .admin-form-pair,
   .admin-product-form > .form-field-wide,
-  .admin-product-form > button {
+  .admin-product-form > button,
+  .admin-category-form > .form-field,
+  .admin-category-form > .form-field-wide,
+  .admin-category-form .source-actions,
+  .admin-inline-check {
     grid-column: 1 / -1;
   }
 

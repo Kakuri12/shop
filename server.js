@@ -381,10 +381,11 @@ function readStore() {
 }
 
 function upgradeStore(store) {
-  if (!store || typeof store !== "object") return { keys: [], orders: [], topups: [], wallets: {}, products: [], inventory: {}, deletedProductIds: [] };
+  if (!store || typeof store !== "object") return { keys: [], orders: [], topups: [], wallets: {}, categories: [], products: [], inventory: {}, deletedProductIds: [] };
   if (!Array.isArray(store.keys)) store.keys = [];
   if (!Array.isArray(store.orders)) store.orders = [];
   if (!Array.isArray(store.topups)) store.topups = [];
+  if (!Array.isArray(store.categories)) store.categories = [];
   if (!Array.isArray(store.products)) store.products = [];
   if (!store.inventory || typeof store.inventory !== "object" || Array.isArray(store.inventory)) store.inventory = {};
   if (!Array.isArray(store.deletedProductIds)) store.deletedProductIds = [];
@@ -788,16 +789,76 @@ function productWithStock(store, product) {
   };
 }
 
+function visibleCategory(category) {
+  return category && category.hidden !== true && category.status !== "hidden";
+}
+
+function defaultCategorySet() {
+  return new Set(categories.map((category) => category.slug));
+}
+
+function normalizeStoredCategory(category, source = "custom") {
+  const slug = slugify(category?.slug || category?.name || "");
+  if (!slug) return null;
+  return {
+    slug,
+    name: String(category?.name || slug).trim(),
+    description: String(category?.description || "").trim(),
+    image: String(category?.image || "/assets/site-logo.png").trim(),
+    source: category?.source || source,
+    hidden: category?.hidden === true || category?.hidden === "true" || category?.status === "hidden",
+    createdAt: category?.createdAt || null,
+    updatedAt: category?.updatedAt || null,
+  };
+}
+
+function categoryListForStore(store = readStore(), options = {}) {
+  const includeHidden = options.includeHidden === true;
+  const bySlug = new Map(categories.map((category) => [category.slug, normalizeStoredCategory({ ...category, source: "default" }, "default")]));
+
+  (Array.isArray(store?.categories) ? store.categories : []).forEach((category) => {
+    const normalized = normalizeStoredCategory(category);
+    if (!normalized) return;
+    const existing = bySlug.get(normalized.slug);
+    bySlug.set(normalized.slug, {
+      ...(existing || {}),
+      ...normalized,
+      source: existing?.source === "default" ? "default" : normalized.source || "custom",
+      createdAt: normalized.createdAt || existing?.createdAt || null,
+    });
+  });
+
+  return [...bySlug.values()].filter((category) => includeHidden || visibleCategory(category));
+}
+
 function catalogForStore(store = readStore()) {
   const deletedIds = deletedProductSet(store);
+  const categoryList = categoryListForStore(store);
+  const visibleCategorySlugs = new Set(categoryList.map((category) => category.slug));
   const defaultProducts = catalogProducts.filter((product) => !deletedIds.has(product.id));
   const customProducts = Array.isArray(store.products) ? store.products.filter((product) => visibleProduct(product) && !deletedIds.has(product.id)) : [];
-  const products = [...defaultProducts, ...customProducts].map((product) => productWithStock(store, product));
-  const categoryList = categories.map((category) => ({
+  const products = [...defaultProducts, ...customProducts]
+    .filter((product) => visibleCategorySlugs.has(product.categorySlug))
+    .map((product) => productWithStock(store, product));
+  const categoriesWithCounts = categoryList.map((category) => ({
     ...category,
     itemCount: products.filter((product) => product.categorySlug === category.slug).length,
   }));
-  return { categories: categoryList, products };
+  return { categories: categoriesWithCounts, products };
+}
+
+function categoriesForAdmin(store = readStore()) {
+  const catalog = catalogForStore(store);
+  const counts = new Map(catalog.categories.map((category) => [category.slug, category.itemCount]));
+  catalog.products.forEach((product) => {
+    counts.set(product.categorySlug, (counts.get(product.categorySlug) || 0) + 0);
+  });
+
+  return categoryListForStore(store, { includeHidden: true }).map((category) => ({
+    ...category,
+    itemCount: counts.get(category.slug) || 0,
+    default: defaultCategorySet().has(category.slug),
+  }));
 }
 
 function customProductsForAdmin(store = readStore()) {
@@ -842,9 +903,9 @@ function normalizeProductFeatures(value) {
     .slice(0, 12);
 }
 
-function normalizeAdminProduct(body, existingProduct, usedIds) {
+function normalizeAdminProduct(body, existingProduct, usedIds, store = readStore()) {
   const categorySlug = String(body.categorySlug || existingProduct?.categorySlug || "").trim();
-  const category = categories.find((item) => item.slug === categorySlug);
+  const category = categoryListForStore(store, { includeHidden: true }).find((item) => item.slug === categorySlug);
   if (!category) throw new Error("Invalid category");
 
   const name = String(body.name || existingProduct?.name || "").trim();
@@ -878,6 +939,28 @@ function normalizeAdminProduct(body, existingProduct, usedIds) {
     hidden: body.hidden === true || body.hidden === "true" || existingProduct?.hidden === true,
     source: "admin",
     createdAt: existingProduct?.createdAt || timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function normalizeAdminCategory(body, existingCategory = null, usedSlugs = new Set()) {
+  const name = String(body.name || existingCategory?.name || "").trim();
+  if (!name) throw new Error("Category name is required");
+
+  const requestedSlug = slugify(body.slug || existingCategory?.slug || name);
+  const slug = existingCategory?.slug || requestedSlug || `category-${crypto.randomBytes(4).toString("hex")}`;
+  if (!existingCategory && usedSlugs.has(slug)) throw new Error("Category slug already exists");
+
+  const defaultCategory = categories.find((category) => category.slug === slug);
+  const timestamp = nowIso();
+  return {
+    slug,
+    name,
+    description: String(body.description ?? existingCategory?.description ?? defaultCategory?.description ?? "").trim(),
+    image: String(body.image ?? existingCategory?.image ?? defaultCategory?.image ?? "/assets/site-logo.png").trim(),
+    source: defaultCategory ? "default" : "custom",
+    hidden: body.hidden === true || body.hidden === "true" || existingCategory?.hidden === true,
+    createdAt: existingCategory?.createdAt || timestamp,
     updatedAt: timestamp,
   };
 }
@@ -1079,11 +1162,11 @@ async function redeemTrueMoneyVoucher(voucherHash) {
 }
 
 function categoryFor(slug, store = readStore()) {
-  return catalogForStore(store).categories.find((category) => category.slug === slug);
+  return categoryListForStore(store, { includeHidden: true }).find((category) => category.slug === slug);
 }
 
 function offerFromProduct(product, store) {
-  const category = store ? categoryFor(product.categorySlug, store) : categories.find((item) => item.slug === product.categorySlug);
+  const category = store ? categoryFor(product.categorySlug, store) : categoryListForStore(readStore(), { includeHidden: true }).find((item) => item.slug === product.categorySlug);
   return {
     id: product.id,
     name: product.name,
@@ -1232,6 +1315,7 @@ function storeFromSupabaseRows(rows) {
     orders: rows.orders.map((row) => ({ ...rowData(row), id: row.id })),
     topups: rows.topups.map((row) => ({ ...rowData(row), id: row.id })),
     wallets: {},
+    categories: rows.categories.map((row) => ({ ...rowData(row), slug: row.slug })),
     products: rows.products.map((row) => ({ ...rowData(row), id: row.id })),
     inventory: {},
     deletedProductIds: rows.deletedProducts.map((row) => row.product_id).filter(Boolean),
@@ -1273,7 +1357,8 @@ function getBackendStoreCache() {
 }
 
 async function readStoreFromSupabase() {
-  const [products, inventory, deletedProducts, wallets, topups, orders, keys] = await Promise.all([
+  const [categoriesData, products, inventory, deletedProducts, wallets, topups, orders, keys] = await Promise.all([
+    supabaseReadAll("shora_categories?select=*&order=position.asc,created_at.asc"),
     supabaseReadAll("shora_products?select=*&order=created_at.asc"),
     supabaseReadAll("shora_inventory?select=*"),
     supabaseReadAll("shora_deleted_products?select=*"),
@@ -1283,7 +1368,7 @@ async function readStoreFromSupabase() {
     supabaseReadAll("shora_license_keys?select=*&order=created_at.desc"),
   ]);
 
-  return storeFromSupabaseRows({ products, inventory, deletedProducts, wallets, topups, orders, keys });
+  return storeFromSupabaseRows({ categories: categoriesData, products, inventory, deletedProducts, wallets, topups, orders, keys });
 }
 
 async function readBackendStore() {
@@ -1334,6 +1419,17 @@ async function saveStoreToSupabase(store) {
   const current = upgradeStore(store);
   const timestamp = nowIso();
 
+  const categoryRows = categoryListForStore(current, { includeHidden: true })
+    .filter((category) => category.source !== "default" || current.categories.some((item) => item.slug === category.slug))
+    .map((category, index) => ({
+      slug: category.slug,
+      data: category,
+      source: category.source || "custom",
+      hidden: category.hidden === true,
+      position: index,
+      updated_at: category.updatedAt || timestamp,
+    }));
+
   const productRows = current.products.map((product) => ({
     id: product.id,
     data: product,
@@ -1350,6 +1446,7 @@ async function saveStoreToSupabase(store) {
   const deletedRows = (current.deletedProductIds || []).map((productId) => ({ product_id: String(productId) }));
 
   await Promise.all([
+    syncSupabaseRows("shora_categories", "shora_categories?on_conflict=slug", "slug", categoryRows),
     syncSupabaseRows("shora_products", "shora_products?on_conflict=id", "id", productRows),
     syncSupabaseRows("shora_inventory", "shora_inventory?on_conflict=product_id", "product_id", inventoryRows),
     syncSupabaseRows("shora_deleted_products", "shora_deleted_products?on_conflict=product_id", "product_id", deletedRows),
@@ -2203,6 +2300,22 @@ async function handleApi(req, res, url) {
       return;
     }
 
+    if (req.method === "GET" && pathname === "/api/bootstrap") {
+      const session = sessionFromRequest(req);
+      const store = await readBackendStore();
+      const catalog = catalogForStore(store);
+      const wallet = session ? walletForUser(store, session.user, { create: false }) : null;
+
+      sendJson(res, 200, {
+        ok: true,
+        catalog: { categories: catalog.categories, products: catalog.products },
+        authenticated: Boolean(session),
+        user: session ? publicDiscordUser(session.user) : null,
+        wallet: wallet ? publicWallet(wallet) : null,
+      });
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/wallet") {
       const session = requireSession(req, res);
       if (!session) return;
@@ -2512,23 +2625,94 @@ async function handleAdminApi(req, res, pathname) {
 
   if (req.method === "GET" && pathname === "/api/admin/products") {
     const catalog = catalogForStore(store);
+    const adminCategories = categoriesForAdmin(store);
     sendJson(res, 200, {
       ok: true,
-      categories: catalog.categories,
+      categories: adminCategories,
       products: productsForAdmin(store),
       defaultProducts: catalogProducts.length,
     });
     return;
   }
 
+  if (req.method === "GET" && pathname === "/api/admin/categories") {
+    sendJson(res, 200, { ok: true, categories: categoriesForAdmin(store) });
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/admin/categories") {
+    const body = await readBody(req);
+    const usedSlugs = new Set(categoryListForStore(store, { includeHidden: true }).map((category) => category.slug));
+    const category = normalizeAdminCategory(body, null, usedSlugs);
+    store.categories.push(category);
+    await saveBackendStore(store);
+    sendJson(res, 201, { ok: true, category, categories: categoriesForAdmin(store) });
+    return;
+  }
+
+  const categoryMatch = pathname.match(/^\/api\/admin\/categories\/([^/]+)$/);
+  if (categoryMatch && req.method === "PATCH") {
+    const slug = decodeURIComponent(categoryMatch[1]);
+    const body = await readBody(req);
+    const allCategories = categoryListForStore(store, { includeHidden: true });
+    const existing = allCategories.find((category) => category.slug === slug);
+    if (!existing) {
+      sendJson(res, 404, { ok: false, error: "Category not found" });
+      return;
+    }
+
+    const index = store.categories.findIndex((category) => category.slug === slug);
+    const current = index >= 0 ? store.categories[index] : existing;
+    const category = normalizeAdminCategory({ ...body, slug }, current, new Set(allCategories.filter((item) => item.slug !== slug).map((item) => item.slug)));
+
+    if (body.restore === true || body.hidden === false || body.hidden === "false") category.hidden = false;
+    if (body.hidden === true || body.hidden === "true" || body.deleted === true) category.hidden = true;
+
+    if (index >= 0) {
+      store.categories[index] = category;
+    } else {
+      store.categories.push(category);
+    }
+
+    await saveBackendStore(store);
+    sendJson(res, 200, { ok: true, category, categories: categoriesForAdmin(store) });
+    return;
+  }
+
+  if (categoryMatch && req.method === "DELETE") {
+    const slug = decodeURIComponent(categoryMatch[1]);
+    const defaultSlugs = defaultCategorySet();
+    const index = store.categories.findIndex((category) => category.slug === slug);
+    const existing = categoryListForStore(store, { includeHidden: true }).find((category) => category.slug === slug);
+
+    if (!existing) {
+      sendJson(res, 404, { ok: false, error: "Category not found" });
+      return;
+    }
+
+    if (defaultSlugs.has(slug)) {
+      const category = normalizeAdminCategory({ ...existing, slug, hidden: true }, existing);
+      if (index >= 0) store.categories[index] = category;
+      else store.categories.push(category);
+      await saveBackendStore(store);
+      sendJson(res, 200, { ok: true, category, categories: categoriesForAdmin(store) });
+      return;
+    }
+
+    if (index >= 0) store.categories.splice(index, 1);
+    await saveBackendStore(store);
+    sendJson(res, 200, { ok: true, category: existing, categories: categoriesForAdmin(store) });
+    return;
+  }
+
   if (req.method === "POST" && pathname === "/api/admin/products") {
     const body = await readBody(req);
     const usedIds = new Set([...catalogProducts.map((product) => product.id), ...customProductsForAdmin(store).map((product) => product.id)]);
-    const product = normalizeAdminProduct(body, null, usedIds);
+    const product = normalizeAdminProduct(body, null, usedIds, store);
     store.products.push(product);
     store.inventory[product.id] = product.stock;
     await saveBackendStore(store);
-    sendJson(res, 201, { ok: true, product: adminProduct(product, store), categories: catalogForStore(store).categories });
+    sendJson(res, 201, { ok: true, product: adminProduct(product, store), categories: categoriesForAdmin(store) });
     return;
   }
 
@@ -2555,9 +2739,9 @@ async function handleAdminApi(req, res, pathname) {
 
       store.deletedProductIds = [...deletedIds];
       await saveBackendStore(store);
-      sendJson(res, 200, { ok: true, product: adminProduct(defaultProduct, store, "default"), categories: catalogForStore(store).categories });
-      return;
-    }
+        sendJson(res, 200, { ok: true, product: adminProduct(defaultProduct, store, "default"), categories: categoriesForAdmin(store) });
+        return;
+      }
 
     if (index === -1) {
       sendJson(res, 404, { ok: false, error: "Product not found or is a default product" });
@@ -2570,12 +2754,12 @@ async function handleAdminApi(req, res, pathname) {
       store.products[index].updatedAt = nowIso();
     } else {
       const usedIds = new Set([...catalogProducts.map((product) => product.id), ...store.products.filter((_, itemIndex) => itemIndex !== index).map((product) => product.id)]);
-      store.products[index] = normalizeAdminProduct(body, store.products[index], usedIds);
+      store.products[index] = normalizeAdminProduct(body, store.products[index], usedIds, store);
       store.inventory[store.products[index].id] = store.products[index].stock;
     }
 
     await saveBackendStore(store);
-    sendJson(res, 200, { ok: true, product: adminProduct(store.products[index], store), categories: catalogForStore(store).categories });
+    sendJson(res, 200, { ok: true, product: adminProduct(store.products[index], store), categories: categoriesForAdmin(store) });
     return;
   }
 
@@ -2587,7 +2771,7 @@ async function handleAdminApi(req, res, pathname) {
       deletedIds.add(productId);
       store.deletedProductIds = [...deletedIds];
       await saveBackendStore(store);
-      sendJson(res, 200, { ok: true, product: adminProduct(defaultProduct, store, "default"), categories: catalogForStore(store).categories });
+      sendJson(res, 200, { ok: true, product: adminProduct(defaultProduct, store, "default"), categories: categoriesForAdmin(store) });
       return;
     }
 
@@ -2600,7 +2784,7 @@ async function handleAdminApi(req, res, pathname) {
     const [removed] = store.products.splice(index, 1);
     delete store.inventory[productId];
     await saveBackendStore(store);
-    sendJson(res, 200, { ok: true, product: adminProduct(removed, store), categories: catalogForStore(store).categories });
+    sendJson(res, 200, { ok: true, product: adminProduct(removed, store), categories: categoriesForAdmin(store) });
     return;
   }
 
