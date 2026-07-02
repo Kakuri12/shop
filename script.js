@@ -98,6 +98,89 @@ function licenseMapText(license) {
   return values.length ? values.join(", ") : "ทุกแมพ";
 }
 
+function licenseStatusLabel(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "active") return "ใช้งานได้";
+  if (normalized === "expired") return "หมดอายุ";
+  if (normalized === "revoked") return "ถูกปิดใช้งาน";
+  if (normalized === "missing") return "ไม่พบคีย์";
+  return status || "ไม่ทราบสถานะ";
+}
+
+function licenseTimeLeft(expiresAt) {
+  if (!expiresAt) {
+    return { label: "ถาวร", detail: "ไม่มีวันหมดอายุ" };
+  }
+
+  const expiresTime = new Date(expiresAt).getTime();
+  if (!Number.isFinite(expiresTime)) {
+    return { label: "ไม่ทราบ", detail: "ข้อมูลวันหมดอายุไม่ถูกต้อง" };
+  }
+
+  const diff = expiresTime - Date.now();
+  if (diff <= 0) {
+    return { label: "หมดอายุแล้ว", detail: `หมดอายุเมื่อ ${formatDate(expiresAt)}` };
+  }
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  const hourMs = 60 * 60 * 1000;
+  const minuteMs = 60 * 1000;
+  if (diff >= dayMs) return { label: `เหลือ ${Math.ceil(diff / dayMs)} วัน`, detail: `หมดอายุ ${formatDate(expiresAt)}` };
+  if (diff >= hourMs) return { label: `เหลือ ${Math.ceil(diff / hourMs)} ชั่วโมง`, detail: `หมดอายุ ${formatDate(expiresAt)}` };
+  return { label: `เหลือ ${Math.max(1, Math.ceil(diff / minuteMs))} นาที`, detail: `หมดอายุ ${formatDate(expiresAt)}` };
+}
+
+function licenseHwidSummary(license) {
+  const limit = Number(license?.devicesLimit || license?.maxDevices || 1);
+  const used = Number(license?.devicesUsed || 0);
+  const isBound = license?.hwidBound === true || used > 0;
+  if (!isBound) {
+    return {
+      label: "ยังไม่ติด HWID",
+      detail: `พร้อมผูกตอนรันครั้งแรก • เครื่อง: 0/${limit}`,
+    };
+  }
+
+  const boundAt = license?.hwidBoundAt ? ` • ผูกเมื่อ ${formatDate(license.hwidBoundAt)}` : "";
+  return {
+    label: "ติด HWID แล้ว",
+    detail: `เครื่อง: ${Math.max(used, 1)}/${limit}${boundAt}`,
+  };
+}
+
+function licenseStatusDetailsHtml(license) {
+  const timeLeft = licenseTimeLeft(license?.expiresAt);
+  const hwid = licenseHwidSummary(license);
+  const productName = license?.planName || license?.productId || "License";
+  const statusLabel = licenseStatusLabel(license?.status);
+  const accessType = license?.expiresAt ? "เช่า / จำกัดเวลา" : "ถาวร";
+
+  return `
+    <div class="license-status-grid">
+      <div class="license-status-item">
+        <span>สินค้า</span>
+        <strong>${escapeHtml(productName)}</strong>
+        <small>${escapeHtml(licenseMapText(license))}</small>
+      </div>
+      <div class="license-status-item">
+        <span>สถานะ</span>
+        <strong>${escapeHtml(statusLabel)}</strong>
+        <small>${escapeHtml(accessType)}</small>
+      </div>
+      <div class="license-status-item">
+        <span>เวลาใช้งาน</span>
+        <strong>${escapeHtml(timeLeft.label)}</strong>
+        <small>${escapeHtml(timeLeft.detail)}</small>
+      </div>
+      <div class="license-status-item">
+        <span>HWID</span>
+        <strong>${escapeHtml(hwid.label)}</strong>
+        <small>${escapeHtml(hwid.detail)}</small>
+      </div>
+    </div>
+  `;
+}
+
 function scriptMapChipsHtml(names = [], slugs = [], hasAccess = true) {
   if (!hasAccess) return '<span class="map-chip muted">ยังไม่มีแมพที่ใช้งานได้</span>';
   const values = Array.isArray(names) && names.length ? names : Array.isArray(slugs) ? slugs : [];
@@ -762,23 +845,17 @@ function setupKeyForm() {
         body: JSON.stringify({ key }),
       });
       const license = data.license;
-      const productName = license.planName || license.productId || "Script License";
-      const message = `สินค้า: ${productName} • สถานะ: ${license.status} • หมดอายุ: ${formatDate(license.expiresAt)} • เครื่อง: ${license.devicesUsed || 0}/${license.devicesLimit || license.maxDevices || 1} • แมพ: ${licenseMapText(license)}`;
       const isActive = license.status === "active";
-      let extraHtml = "";
-      if (isActive) {
-        try {
-          const session = await apiJson("/api/session");
-          if (session.authenticated && session.user?.id) {
-            extraHtml = scriptSnippetBox(buildLoaderSnippet(key, session.user.id), "สคริปต์จากคีย์นี้");
-          } else {
-            extraHtml = `<p><a href="/auth/discord">เข้าสู่ระบบด้วย Discord</a> เพื่อสร้างสคริปต์สำหรับรัน</p>`;
-          }
-        } catch {
-          extraHtml = `<p><a href="/auth/discord">เข้าสู่ระบบด้วย Discord</a> เพื่อสร้างสคริปต์สำหรับรัน</p>`;
-        }
-      }
-      setKeyResult(isActive ? "success" : "error", isActive ? "คีย์ใช้งานได้" : "คีย์ใช้งานไม่ได้", message, isActive ? "OK" : "X", extraHtml);
+      const message = isActive
+        ? "คีย์นี้พร้อมใช้งาน ดูวันคงเหลือและสถานะ HWID ด้านล่าง"
+        : "คีย์นี้ยังไม่พร้อมใช้งาน ดูสถานะและวันหมดอายุด้านล่าง";
+      setKeyResult(
+        isActive ? "success" : "error",
+        isActive ? "คีย์ใช้งานได้" : "คีย์ใช้งานไม่ได้",
+        message,
+        isActive ? "OK" : "X",
+        licenseStatusDetailsHtml(license),
+      );
       if (isActive) {
         document.querySelectorAll("#scriptCopyKey, #resetDeviceKey").forEach((field) => {
           if (!field.value.trim()) field.value = key;
