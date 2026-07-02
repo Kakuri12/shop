@@ -98,6 +98,82 @@ function licenseMapText(license) {
   return values.length ? values.join(", ") : "ทุกแมพ";
 }
 
+function scriptMapChipsHtml(names = [], slugs = [], hasAccess = true) {
+  if (!hasAccess) return '<span class="map-chip muted">ยังไม่มีแมพที่ใช้งานได้</span>';
+  const values = Array.isArray(names) && names.length ? names : Array.isArray(slugs) ? slugs : [];
+  if (!values.length) return '<span class="map-chip active">ทุกแมพ</span>';
+  return values.map((name) => `<span class="map-chip">${escapeHtml(name)}</span>`).join("");
+}
+
+function fillScriptKeyFields(key) {
+  const normalizedKey = String(key || "").trim().toUpperCase();
+  if (!normalizedKey) return;
+  document.querySelectorAll("#scriptCopyKey, #resetDeviceKey, #licenseKey").forEach((field) => {
+    field.value = normalizedKey;
+  });
+}
+
+function scriptAccountPanelHtml(data) {
+  if (!data?.hasAccess || !data.pass?.key) {
+    return `
+      <div class="script-account-empty">
+        <strong>ยังไม่มี Shora Pass</strong>
+        <p>ซื้อสคริปต์อย่างน้อย 1 แมพก่อน ระบบจะสร้างคีย์หลักให้บัญชี Discord นี้อัตโนมัติ</p>
+      </div>
+    `;
+  }
+
+  const entitlements = Array.isArray(data.entitlements) ? data.entitlements.filter((item) => !item.pass) : [];
+  const rows = entitlements.slice(0, 6).map((item) => `
+    <div class="script-entitlement-row">
+      <span>${escapeHtml(item.planName || item.productId || "Script")}</span>
+      <small>${escapeHtml((item.allowedMapNames && item.allowedMapNames.length ? item.allowedMapNames : item.allowedMaps || []).join(", ") || "ทุกแมพ")}</small>
+    </div>
+  `).join("");
+
+  return `
+    <div class="script-account-head">
+      <div>
+        <span>Shora Pass ของคุณ</span>
+        <strong>${escapeHtml(data.pass.key)}</strong>
+      </div>
+      <div class="script-account-actions">
+        <button class="button button-small button-secondary" type="button" data-use-script-pass="${escapeHtml(data.pass.key)}">ใช้คีย์นี้</button>
+        <button class="button button-small button-glass" type="button" data-copy="${escapeHtml(data.pass.key)}">Copy</button>
+      </div>
+    </div>
+    <div class="script-map-list">
+      <span>แมพที่เล่นได้</span>
+      <div>${scriptMapChipsHtml(data.allowedMapNames, data.allowedMaps, data.hasAccess)}</div>
+    </div>
+    ${rows ? `<div class="script-entitlement-list">${rows}</div>` : ""}
+  `;
+}
+
+async function loadScriptAccountPanel() {
+  const panel = document.querySelector("#scriptAccountPanel");
+  if (!panel) return;
+
+  panel.className = "script-account-panel loading";
+  panel.innerHTML = "<strong>กำลังตรวจสอบ Shora Pass...</strong>";
+
+  try {
+    const data = await apiJson("/api/script/me");
+    panel.className = `script-account-panel ${data.hasAccess ? "has-access" : "empty"}`;
+    panel.innerHTML = scriptAccountPanelHtml(data);
+    if (data.pass?.key) fillScriptKeyFields(data.pass.key);
+  } catch (error) {
+    panel.className = "script-account-panel empty";
+    panel.innerHTML = `
+      <div class="script-account-empty">
+        <strong>เข้าสู่ระบบเพื่อดูคีย์ของคุณ</strong>
+        <p>ระบบจะแสดง Shora Pass และแมพที่เล่นได้จากบัญชี Discord นี้</p>
+        ${loginPromptHtml()}
+      </div>
+    `;
+  }
+}
+
 function showToast(message) {
   if (!toast) return;
   toast.textContent = message;
@@ -741,6 +817,16 @@ function setupScriptCopyTool() {
   const form = document.querySelector("#scriptCopyForm");
   const input = document.querySelector("#scriptCopyKey");
   if (!form || !input) return;
+
+  loadScriptAccountPanel();
+
+  const accountPanel = document.querySelector("#scriptAccountPanel");
+  accountPanel?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-use-script-pass]");
+    if (!button) return;
+    fillScriptKeyFields(button.dataset.useScriptPass);
+    showToast("ใส่ Shora Pass ให้แล้ว");
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();

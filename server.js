@@ -2539,6 +2539,91 @@ function scriptToolPayload(record, req) {
   };
 }
 
+function publicScriptEntitlement(license) {
+  const publicLicense = isScriptPassLicense(license) ? publicScriptPassLicense(license) : publicScriptLicense(license);
+  return {
+    key: publicLicense.key,
+    productId: publicLicense.productId,
+    planName: publicLicense.planName,
+    status: publicLicense.status,
+    expiresAt: publicLicense.expiresAt,
+    allowedMaps: publicLicense.allowedMaps,
+    allowedMapNames: publicLicense.allowedMapNames,
+    active: scriptLicenseIsActive(license),
+    pass: publicLicense.pass,
+  };
+}
+
+async function userScriptAccount(discordId, store = readStore()) {
+  const normalizedDiscordId = normalizeDiscordId(discordId);
+
+  if (supabaseConfigured()) {
+    const rows = await supabaseRequest(scriptLicensesForDiscordSelect(normalizedDiscordId));
+    const licenses = Array.isArray(rows) ? rows : [];
+    const entitlements = licenses.filter((license) => !isScriptPassLicense(license));
+    const activeEntitlements = entitlements.filter(scriptLicenseIsActive);
+    let passLicense = licenses.find(isScriptPassLicense) || null;
+
+    let allowedMaps = [];
+    if (activeEntitlements.length) {
+      allowedMaps = mergeAllowedMaps(...activeEntitlements.map((license) => license.allowed_maps));
+    } else if (passLicense && scriptLicenseIsActive(passLicense)) {
+      allowedMaps = normalizeAllowedMaps(passLicense.allowed_maps);
+    }
+
+    if (activeEntitlements.length) {
+      passLicense = await ensureAccountPassLicense(normalizedDiscordId, {
+        allowedMaps,
+        maxDevices: Math.max(1, ...activeEntitlements.map((license) => Number(license.max_devices || 1)).filter(Number.isFinite)),
+        note: "Shora Pass synced from License Center",
+        createdBy: "account",
+      }) || passLicense;
+    }
+
+    const hasAccess = Boolean((passLicense && scriptLicenseIsActive(passLicense)) || activeEntitlements.length);
+    return {
+      backend: "supabase",
+      hasAccess,
+      pass: passLicense && hasAccess ? publicScriptPassLicense(passLicense, allowedMaps) : null,
+      allowedMaps: hasAccess ? allowedMaps : [],
+      allowedMapNames: hasAccess ? mapNamesForSlugs(allowedMaps) : [],
+      entitlements: entitlements.map(publicScriptEntitlement),
+      totalEntitlements: entitlements.length,
+    };
+  }
+
+  const localLicenses = store.keys.filter((license) => String(license.contact || "") === `discord:${normalizedDiscordId}`);
+  const activeLicenses = localLicenses.filter((license) => effectiveStatus(license) === "active");
+  const passLicense = activeLicenses.find((license) => license.productId === SCRIPT_PASS_PRODUCT_ID || String(license.key || "").startsWith(`${SCRIPT_KEY_PREFIX}-`)) || null;
+  const allowedMaps = activeLicenses.length ? mergeAllowedMaps(...activeLicenses.map((license) => license.allowedMaps)) : [];
+
+  return {
+    backend: "local",
+    hasAccess: activeLicenses.length > 0,
+    pass: passLicense ? publicLocalScriptLicense({ ...passLicense, allowedMaps }) : null,
+    allowedMaps: activeLicenses.length ? allowedMaps : [],
+    allowedMapNames: activeLicenses.length ? mapNamesForSlugs(allowedMaps) : [],
+    entitlements: localLicenses.map((license) => ({
+      ...publicLocalScriptLicense(license),
+      active: effectiveStatus(license) === "active",
+    })),
+    totalEntitlements: localLicenses.length,
+  };
+}
+
+async function handleScriptAccount(req, res) {
+  const session = requireSession(req, res);
+  if (!session) return;
+
+  const store = await readBackendStore();
+  const account = await userScriptAccount(session.user.id, store);
+  sendJson(res, 200, {
+    ok: true,
+    user: publicDiscordUser(session.user),
+    ...account,
+  });
+}
+
 async function handleScriptAuth(req, res, url) {
   const body = req.method === "POST" ? await readBody(req) : {};
   const access = await verifyScriptAccess(req, url, body);
@@ -2702,6 +2787,11 @@ async function handleApi(req, res, url) {
 
     if (req.method === "POST" && pathname === "/api/script/reset-device") {
       await handleScriptResetDevice(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/script/me") {
+      await handleScriptAccount(req, res);
       return;
     }
 
