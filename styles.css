@@ -99,6 +99,14 @@ button {
   color: inherit;
 }
 
+a,
+button,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
 img {
   display: block;
   max-width: 100%;
@@ -120,7 +128,7 @@ img {
 }
 
 .page-loader.is-active {
-  pointer-events: auto;
+  pointer-events: none;
   opacity: 1;
 }
 
@@ -2453,6 +2461,25 @@ td {
     padding-top: 14px;
   }
 
+  .brand {
+    max-width: calc(100% - 142px);
+    gap: 8px;
+  }
+
+  .brand-mark {
+    width: 46px;
+    height: 38px;
+  }
+
+  .brand-mark img {
+    width: 44px;
+    height: 36px;
+  }
+
+  .login-button {
+    max-width: 132px;
+  }
+
   .bottom-nav {
     top: 74px;
     width: calc(100% - 22px);
@@ -2461,7 +2488,9 @@ td {
   }
 
   .bottom-nav a {
-    font-size: 0.78rem;
+    min-height: 48px;
+    padding: 0 4px;
+    font-size: clamp(0.66rem, 2.55vw, 0.78rem);
     line-height: 1.12;
     white-space: normal;
     text-align: center;
@@ -2638,9 +2667,9 @@ td {
   }
 
   .account-menu {
-    top: 64px;
+    top: calc(var(--header-height) - 2px);
     right: 11px;
-    width: 176px;
+    width: min(220px, calc(100vw - 22px));
   }
 
   .bottom-nav a {

@@ -40,7 +40,8 @@ const fallbackCatalog = {
 const page = document.body.dataset.page || "home";
 const toast = document.querySelector("#toast");
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-const pageTransitionMs = 2000;
+const coarsePointer = window.matchMedia("(hover: none), (pointer: coarse)");
+const pageTransitionMs = 450;
 const pageTransitionStorageKey = "shora_loader_until";
 let revealObserver;
 let catalogCache;
@@ -953,6 +954,8 @@ function resetLiquidPosition(event) {
 }
 
 function registerLiquidTargets() {
+  if (coarsePointer.matches) return;
+
   document
     .querySelectorAll(".category-card, .product-card, .tool-card, .payment-card, .checkout-dialog, .admin-card, .metric-card")
     .forEach((element) => {
@@ -1083,7 +1086,7 @@ function setupPageTransitions() {
     showPageLoader();
     window.setTimeout(() => {
       location.href = url.href;
-    }, reduceMotion.matches ? 80 : 180);
+    }, reduceMotion.matches || coarsePointer.matches ? 40 : 120);
   });
 }
 
@@ -1181,13 +1184,7 @@ async function setupSessionButton() {
 
     const user = data.user;
     const displayName = user.displayName || user.globalName || user.username || "Discord";
-    let walletBalance = "฿0.00";
-    try {
-      const walletData = await apiJson("/api/wallet");
-      walletBalance = formatBaht(walletData.wallet?.balance || 0);
-    } catch {
-      walletBalance = "฿0.00";
-    }
+    const walletBalance = "฿0.00";
 
     const avatar = user.avatarUrl
       ? `<img class="login-avatar" src="${escapeHtml(user.avatarUrl)}" alt="" />`
@@ -1218,10 +1215,17 @@ async function setupSessionButton() {
     menu.innerHTML = `
       <strong class="account-name">${escapeHtml(displayName)}</strong>
       <div class="account-row"><span>ยอดสะสม</span><em>0</em></div>
-      <div class="account-row"><span>ยอดเงิน</span><em>${escapeHtml(walletBalance)}</em></div>
+      <div class="account-row"><span>ยอดเงิน</span><em data-account-balance>${escapeHtml(walletBalance)}</em></div>
       <a class="account-row account-link" href="/history" role="menuitem"><span>ประวัติ</span><em>›</em></a>
       <a class="account-logout" href="/auth/logout" role="menuitem"><span>ออกจากระบบ</span><span aria-hidden="true">↪</span></a>
     `;
+
+    apiJson("/api/wallet")
+      .then((walletData) => {
+        const balance = menu.querySelector("[data-account-balance]");
+        if (balance) balance.textContent = formatBaht(walletData.wallet?.balance || 0);
+      })
+      .catch(() => {});
 
     const closeMenu = () => {
       menu.hidden = true;

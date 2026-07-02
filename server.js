@@ -27,8 +27,10 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || process.env.SCRIPT_API_B
 const SCRIPT_SOURCE_URL = process.env.SCRIPT_SOURCE_URL || "";
 const SCRIPT_SOURCE_FILE = process.env.SCRIPT_SOURCE_FILE || "scripts/source.lua";
 const SCRIPT_KEY_PREFIX = (process.env.SCRIPT_KEY_PREFIX || "SHORA").toUpperCase().replace(/[^A-Z0-9]/g, "") || "SHORA";
+const STORE_CACHE_TTL_MS = Math.max(0, Number(process.env.STORE_CACHE_TTL_MS || 3000));
 const sessions = new Map();
 const topupLocks = new Set();
+let backendStoreCache = { expiresAt: 0, store: null };
 
 function loadEnvFile(envPath) {
   if (!fs.existsSync(envPath)) return;
@@ -1244,6 +1246,24 @@ function storeFromSupabaseRows(rows) {
   return store;
 }
 
+function cloneStore(store) {
+  return JSON.parse(JSON.stringify(upgradeStore(store)));
+}
+
+function setBackendStoreCache(store) {
+  if (!supabaseConfigured() || STORE_CACHE_TTL_MS <= 0) return;
+  backendStoreCache = {
+    expiresAt: Date.now() + STORE_CACHE_TTL_MS,
+    store: cloneStore(store),
+  };
+}
+
+function getBackendStoreCache() {
+  if (!supabaseConfigured() || STORE_CACHE_TTL_MS <= 0) return null;
+  if (!backendStoreCache.store || backendStoreCache.expiresAt <= Date.now()) return null;
+  return cloneStore(backendStoreCache.store);
+}
+
 async function readStoreFromSupabase() {
   const [products, inventory, deletedProducts, wallets, topups, orders, keys] = await Promise.all([
     supabaseReadAll("shora_products?select=*&order=created_at.asc"),
@@ -1261,8 +1281,13 @@ async function readStoreFromSupabase() {
 async function readBackendStore() {
   if (!supabaseConfigured()) return readStore();
 
+  const cachedStore = getBackendStoreCache();
+  if (cachedStore) return cachedStore;
+
   try {
-    return await readStoreFromSupabase();
+    const store = await readStoreFromSupabase();
+    setBackendStoreCache(store);
+    return cloneStore(store);
   } catch (error) {
     console.warn(`Supabase store read failed, using local fallback: ${error.message}`);
     return readStore();
@@ -1375,6 +1400,7 @@ async function saveBackendStore(store) {
 
   try {
     await saveStoreToSupabase(store);
+    setBackendStoreCache(store);
   } catch (error) {
     console.warn(`Supabase store write failed, local backup saved: ${error.message}`);
     throw error;
