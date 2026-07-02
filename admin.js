@@ -25,7 +25,6 @@ const scriptLoaderCode = document.querySelector("#scriptLoaderCode");
 const copyScriptLoaderButton = document.querySelector("#copyScriptLoader");
 const scriptSourceForm = document.querySelector("#scriptSourceForm");
 const scriptSourceEditor = document.querySelector("#scriptSourceEditor");
-const scriptSourceMapSelect = document.querySelector("#scriptSourceMap");
 const scriptSourceMeta = document.querySelector("#scriptSourceMeta");
 const reloadScriptSourceButton = document.querySelector("#reloadScriptSource");
 const toast = document.querySelector("#toast");
@@ -89,22 +88,6 @@ function renderScriptMapHints() {
   hints.forEach((hint) => {
     hint.textContent = text;
   });
-  renderScriptSourceMapOptions();
-}
-
-function renderScriptSourceMapOptions() {
-  if (!scriptSourceMapSelect) return;
-  const current = scriptSourceMapSelect.value || "main";
-  const options = [
-    { slug: "main", name: "Default / fallback (main)" },
-    ...latestScriptMaps.map((map) => ({ slug: map.slug, name: `${map.name} (${map.slug})` })),
-  ];
-
-  scriptSourceMapSelect.innerHTML = options
-    .map((map) => `<option value="${escapeHtml(map.slug)}">${escapeHtml(map.name)}</option>`)
-    .join("");
-
-  scriptSourceMapSelect.value = options.some((map) => map.slug === current) ? current : "main";
 }
 
 function escapeHtml(value) {
@@ -431,12 +414,10 @@ async function loadScriptKeys() {
 async function loadScriptSource() {
   if (!scriptSourceEditor) return;
   try {
-    const sourceId = scriptSourceMapSelect?.value || "main";
-    const data = await adminFetch(`/api/admin/script-source?id=${encodeURIComponent(sourceId)}`);
+    const data = await adminFetch("/api/admin/script-source");
     scriptSourceEditor.value = data.source || "";
     if (scriptSourceMeta) {
-      const label = scriptSourceMapSelect?.selectedOptions?.[0]?.textContent || data.id || sourceId;
-      scriptSourceMeta.textContent = `Serving ${label} from ${data.path} (${data.kind}).`;
+      scriptSourceMeta.textContent = `Serving one Lua router from ${data.path} (${data.kind}).`;
     }
   } catch (error) {
     if (scriptSourceMeta) scriptSourceMeta.textContent = error.message;
@@ -705,20 +686,15 @@ if (reloadScriptSourceButton) {
   reloadScriptSourceButton.addEventListener("click", loadScriptSource);
 }
 
-if (scriptSourceMapSelect) {
-  scriptSourceMapSelect.addEventListener("change", loadScriptSource);
-}
-
 if (scriptSourceForm) {
   scriptSourceForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const submitButton = scriptSourceForm.querySelector("button[type='submit']");
     submitButton.disabled = true;
     try {
-      const sourceId = scriptSourceMapSelect?.value || "main";
       const data = await adminFetch("/api/admin/script-source", {
         method: "PUT",
-        body: JSON.stringify({ id: sourceId, source: scriptSourceEditor.value }),
+        body: JSON.stringify({ source: scriptSourceEditor.value }),
       });
       if (scriptSourceMeta) {
         scriptSourceMeta.textContent = `Saved ${Number(data.bytes || 0).toLocaleString("th-TH")} bytes to ${data.path}.`;

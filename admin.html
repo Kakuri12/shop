@@ -397,14 +397,8 @@
                 <h3>Script source</h3>
               </div>
             </div>
-            <p class="source-help" id="scriptSourceMeta">Source is served only after key and HWID pass.</p>
+            <p class="source-help" id="scriptSourceMeta">Edit one Lua router here. Add map ids and URLs in the Maps table; the loader will serve this after key and HWID pass.</p>
             <form class="admin-form" id="scriptSourceForm">
-              <label class="form-field">
-                <span>Source target</span>
-                <select id="scriptSourceMap" name="sourceId">
-                  <option value="main">Default / fallback (main)</option>
-                </select>
-              </label>
               <label class="form-field">
                 <span>Lua source</span>
                 <textarea class="source-editor" id="scriptSourceEditor" name="source" spellcheck="false" placeholder='print("Shora source loaded")'></textarea>

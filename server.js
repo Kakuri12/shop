@@ -111,6 +111,10 @@ const categories = [
 ];
 
 const scriptMaps = [
+  { slug: "rivals", name: "RIVALS", keyPrefix: "RIV", keywords: ["RIVALS"] },
+  { slug: "murder-mystery-2", name: "Murder Mystery 2", keyPrefix: "MM2", placeIds: ["142823291"], keywords: ["Murder Mystery 2", "MM2"] },
+  { slug: "social-hangout", name: "Social Hangout", keyPrefix: "SOC", keywords: ["Social Hangout"] },
+  { slug: "fpsallmap", name: "FPSALLMAP", keyPrefix: "FPS", keywords: ["FPSALLMAP"] },
   { slug: "blox-fruits", name: "Blox Fruits", keyPrefix: "BF", gameIds: ["994732206"] },
   { slug: "king-legacy", name: "King Legacy", keyPrefix: "KL", placeIds: ["4520749081", "6381829480", "5931540094", "6596144663", "15759515082"] },
   { slug: "blade-ball", name: "Blade Ball", keyPrefix: "BB", creatorIds: ["12836673"] },
@@ -1863,11 +1867,16 @@ function normalizeRuntimeId(value) {
   return String(value || "").replace(/[^\d]/g, "");
 }
 
+function normalizeRuntimeText(value) {
+  return String(value || "").trim().slice(0, 120);
+}
+
 function scriptRuntimeContext(url, body = {}) {
   return {
     gameId: normalizeRuntimeId(body.gameId || body.game_id || url.searchParams.get("gameId") || url.searchParams.get("game_id")),
     placeId: normalizeRuntimeId(body.placeId || body.place_id || url.searchParams.get("placeId") || url.searchParams.get("place_id")),
     creatorId: normalizeRuntimeId(body.creatorId || body.creator_id || url.searchParams.get("creatorId") || url.searchParams.get("creator_id")),
+    placeName: normalizeRuntimeText(body.placeName || body.place_name || url.searchParams.get("placeName") || url.searchParams.get("place_name")),
   };
 }
 
@@ -1875,12 +1884,22 @@ function idMatches(list, value) {
   return Boolean(value && Array.isArray(list) && list.map(String).includes(String(value)));
 }
 
+function keywordMatches(list, value) {
+  const normalizedValue = String(value || "").toLowerCase();
+  if (!normalizedValue || !Array.isArray(list)) return false;
+  return list.some((item) => {
+    const keyword = String(item || "").toLowerCase();
+    return keyword && normalizedValue.includes(keyword);
+  });
+}
+
 function matchedScriptMaps(context) {
-  if (!context?.gameId && !context?.placeId && !context?.creatorId) return [];
+  if (!context?.gameId && !context?.placeId && !context?.creatorId && !context?.placeName) return [];
   return scriptMaps.filter((map) =>
     idMatches(map.gameIds, context.gameId) ||
     idMatches(map.placeIds, context.placeId) ||
-    idMatches(map.creatorIds, context.creatorId),
+    idMatches(map.creatorIds, context.creatorId) ||
+    keywordMatches(map.keywords, context.placeName),
   );
 }
 
@@ -1900,7 +1919,7 @@ function scriptMapAccessForLicense(license, context) {
     };
   }
 
-  if (!context?.gameId && !context?.placeId && !context?.creatorId) {
+  if (!context?.gameId && !context?.placeId && !context?.creatorId && !context?.placeName) {
     return {
       allowed: false,
       allowedAllMaps: false,
@@ -2181,6 +2200,7 @@ local env = (getgenv and getgenv()) or _G
 local Key = tostring(env.Key or "")
 local DiscordId = tostring(env.id or env.Id or env.DiscordId or "")
 local HttpService = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local function getHWID()
   local ok, value = pcall(function()
@@ -2204,6 +2224,11 @@ local hwid = getHWID()
 local GameId = tostring(game.GameId or "")
 local PlaceId = tostring(game.PlaceId or "")
 local CreatorId = tostring(game.CreatorId or "")
+local PlaceName = ""
+pcall(function()
+  local info = MarketplaceService:GetProductInfo(game.PlaceId)
+  PlaceName = tostring(info and info.Name or "")
+end)
 local requestFn = (syn and syn.request) or (http and http.request) or http_request or request
 local response
 
@@ -2219,12 +2244,13 @@ if requestFn then
       hwid = hwid,
       gameId = GameId,
       placeId = PlaceId,
-      creatorId = CreatorId
+      creatorId = CreatorId,
+      placeName = PlaceName
     })
   })
 else
   response = {
-    Body = game:HttpGet("${sourceUrl}?key=" .. HttpService:UrlEncode(Key) .. "&id=" .. HttpService:UrlEncode(DiscordId) .. "&hwid=" .. HttpService:UrlEncode(hwid) .. "&gameId=" .. HttpService:UrlEncode(GameId) .. "&placeId=" .. HttpService:UrlEncode(PlaceId) .. "&creatorId=" .. HttpService:UrlEncode(CreatorId))
+    Body = game:HttpGet("${sourceUrl}?key=" .. HttpService:UrlEncode(Key) .. "&id=" .. HttpService:UrlEncode(DiscordId) .. "&hwid=" .. HttpService:UrlEncode(hwid) .. "&gameId=" .. HttpService:UrlEncode(GameId) .. "&placeId=" .. HttpService:UrlEncode(PlaceId) .. "&creatorId=" .. HttpService:UrlEncode(CreatorId) .. "&placeName=" .. HttpService:UrlEncode(PlaceName))
   }
 end
 
@@ -2717,7 +2743,7 @@ async function handleScriptSource(req, res, url) {
     return;
   }
 
-  const source = await readBackendScriptSource(access.mapSlug || SCRIPT_SOURCE_DEFAULT_ID);
+  const source = await readBackendScriptSource(SCRIPT_SOURCE_DEFAULT_ID);
   sendLua(res, 200, source.source);
 }
 
@@ -3523,16 +3549,9 @@ async function handleAdminApi(req, res, pathname) {
   }
 
   if (req.method === "GET" && pathname === "/api/admin/script-source") {
-    const adminUrl = new URL(req.url, "http://localhost");
-    const sourceId = normalizeScriptSourceId(adminUrl.searchParams.get("id"));
-    if (!sourceId) {
-      sendJson(res, 400, { ok: false, error: "Invalid script source target" });
-      return;
-    }
-
-    const source = await readBackendScriptSource(sourceId, {
+    const source = await readBackendScriptSource(SCRIPT_SOURCE_DEFAULT_ID, {
       fallbackToMain: false,
-      allowFileFallback: sourceId === SCRIPT_SOURCE_DEFAULT_ID,
+      allowFileFallback: true,
     });
     sendJson(res, 200, {
       ok: true,
@@ -3546,19 +3565,13 @@ async function handleAdminApi(req, res, pathname) {
 
   if (req.method === "PUT" && pathname === "/api/admin/script-source") {
     const body = await readBody(req);
-    const sourceId = normalizeScriptSourceId(body.id || body.sourceId);
-    if (!sourceId) {
-      sendJson(res, 400, { ok: false, error: "Invalid script source target" });
-      return;
-    }
-
     const source = String(body.source || "");
     if (source.length > 2_000_000) {
       sendJson(res, 400, { ok: false, error: "Source is too large." });
       return;
     }
 
-    const saved = await writeBackendScriptSource(source, sourceId);
+    const saved = await writeBackendScriptSource(source, SCRIPT_SOURCE_DEFAULT_ID);
     sendJson(res, 200, {
       ok: true,
       id: saved.id,
