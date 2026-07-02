@@ -109,32 +109,33 @@ const categories = [
 ];
 
 const scriptMaps = [
-  { slug: "blox-fruits", name: "Blox Fruits", gameIds: ["994732206"] },
-  { slug: "king-legacy", name: "King Legacy", placeIds: ["4520749081", "6381829480", "5931540094", "6596144663", "15759515082"] },
-  { slug: "blade-ball", name: "Blade Ball", creatorIds: ["12836673"] },
-  { slug: "anime-fighting-simulator", name: "Anime Fighting Simulator", placeIds: ["6299805723"] },
-  { slug: "rgh", name: "RGH", placeIds: ["914010731"] },
-  { slug: "haze-piece", name: "Haze Piece", placeIds: ["6918802270", "14979402479"] },
-  { slug: "anime-last-stand", name: "Anime Last Stand", creatorIds: ["12229756"] },
-  { slug: "drive-empire", name: "Drive Empire", placeIds: ["3351674303"] },
-  { slug: "sols-rng", name: "Sol's RNG", placeIds: ["15532962292"] },
-  { slug: "attack-on-titan-revolution", name: "Attack on Titan Revolution", creatorIds: ["17347863"] },
-  { slug: "anime-defenders", name: "Anime Defenders", creatorIds: ["34121350"] },
-  { slug: "anime-vanguards", name: "Anime Vanguards", creatorIds: ["17219742"] },
-  { slug: "fisch", name: "Fisch", creatorIds: ["7381705"], placeIds: ["16732694052"] },
-  { slug: "anime-adventures", name: "Anime Adventures", creatorIds: ["10611639"] },
-  { slug: "blue-lock", name: "Blue Lock", gameIds: ["6325068386"] },
-  { slug: "arise-crossover", name: "Arise Crossover", gameIds: ["7074860883"], placeIds: ["87039211657390"] },
-  { slug: "bubble-gum-simulator-infinity", name: "Bubble Gum Simulator Infinity", gameIds: ["7436755782"], creatorIds: ["33720745"] },
-  { slug: "grow-a-garden", name: "Grow a Garden", gameIds: ["9509842868"] },
-  { slug: "all-star-tower-defense-x", name: "All Star Tower Defense X", gameIds: ["6057699512"] },
-  { slug: "99-nights-in-the-forest", name: "99 Nights in the Forest", gameIds: ["7326934954"] },
-  { slug: "zombie", name: "Zombie", gameIds: ["7750955984"] },
-  { slug: "fish-it", name: "Fish It", gameIds: ["121864768012064"] },
-  { slug: "build-a-zoo", name: "Build A Zoo", gameIds: ["8066283370"] },
+  { slug: "blox-fruits", name: "Blox Fruits", keyPrefix: "BF", gameIds: ["994732206"] },
+  { slug: "king-legacy", name: "King Legacy", keyPrefix: "KL", placeIds: ["4520749081", "6381829480", "5931540094", "6596144663", "15759515082"] },
+  { slug: "blade-ball", name: "Blade Ball", keyPrefix: "BB", creatorIds: ["12836673"] },
+  { slug: "anime-fighting-simulator", name: "Anime Fighting Simulator", keyPrefix: "AFS", placeIds: ["6299805723"] },
+  { slug: "rgh", name: "RGH", keyPrefix: "RGH", placeIds: ["914010731"] },
+  { slug: "haze-piece", name: "Haze Piece", keyPrefix: "HAZE", placeIds: ["6918802270", "14979402479"] },
+  { slug: "anime-last-stand", name: "Anime Last Stand", keyPrefix: "ALS", creatorIds: ["12229756"] },
+  { slug: "drive-empire", name: "Drive Empire", keyPrefix: "DE", placeIds: ["3351674303"] },
+  { slug: "sols-rng", name: "Sol's RNG", keyPrefix: "SOL", placeIds: ["15532962292"] },
+  { slug: "attack-on-titan-revolution", name: "Attack on Titan Revolution", keyPrefix: "AOTR", creatorIds: ["17347863"] },
+  { slug: "anime-defenders", name: "Anime Defenders", keyPrefix: "AD", creatorIds: ["34121350"] },
+  { slug: "anime-vanguards", name: "Anime Vanguards", keyPrefix: "AV", creatorIds: ["17219742"] },
+  { slug: "fisch", name: "Fisch", keyPrefix: "FISCH", creatorIds: ["7381705"], placeIds: ["16732694052"] },
+  { slug: "anime-adventures", name: "Anime Adventures", keyPrefix: "AA", creatorIds: ["10611639"] },
+  { slug: "blue-lock", name: "Blue Lock", keyPrefix: "BL", gameIds: ["6325068386"] },
+  { slug: "arise-crossover", name: "Arise Crossover", keyPrefix: "AC", gameIds: ["7074860883"], placeIds: ["87039211657390"] },
+  { slug: "bubble-gum-simulator-infinity", name: "Bubble Gum Simulator Infinity", keyPrefix: "BGS", gameIds: ["7436755782"], creatorIds: ["33720745"] },
+  { slug: "grow-a-garden", name: "Grow a Garden", keyPrefix: "GAG", gameIds: ["9509842868"] },
+  { slug: "all-star-tower-defense-x", name: "All Star Tower Defense X", keyPrefix: "ASTDX", gameIds: ["6057699512"] },
+  { slug: "99-nights-in-the-forest", name: "99 Nights in the Forest", keyPrefix: "N99", gameIds: ["7326934954"] },
+  { slug: "zombie", name: "Zombie", keyPrefix: "ZMB", gameIds: ["7750955984"] },
+  { slug: "fish-it", name: "Fish It", keyPrefix: "FIT", gameIds: ["121864768012064"] },
+  { slug: "build-a-zoo", name: "Build A Zoo", keyPrefix: "BAZ", gameIds: ["8066283370"] },
   {
     slug: "misc-supported",
     name: "Other Supported Maps",
+    keyPrefix: "MSC",
     gameIds: ["6701277882", "7671049560", "7394964165", "8144728961", "5130394318", "9186719164", "8202280624", "9348272796", "10200395747"],
   },
 ];
@@ -931,10 +932,25 @@ function mapNamesForSlugs(slugs) {
   return normalizeAllowedMaps(slugs).map((slug) => names.get(slug) || slug);
 }
 
+function cleanKeyPrefix(value, fallback = SCRIPT_KEY_PREFIX) {
+  return String(value || fallback || SCRIPT_KEY_PREFIX)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 8) || fallback || SCRIPT_KEY_PREFIX;
+}
+
+function keyPrefixForAllowedMaps(slugs, fallback = SCRIPT_KEY_PREFIX) {
+  const allowedMaps = normalizeAllowedMaps(slugs);
+  if (allowedMaps.length !== 1) return cleanKeyPrefix(fallback);
+  const map = scriptMaps.find((item) => item.slug === allowedMaps[0]);
+  return cleanKeyPrefix(map?.keyPrefix, fallback);
+}
+
 function scriptMapOptions() {
   return scriptMaps.map((map) => ({
     slug: map.slug,
     name: map.name,
+    keyPrefix: cleanKeyPrefix(map.keyPrefix),
     gameIds: map.gameIds || [],
     placeIds: map.placeIds || [],
     creatorIds: map.creatorIds || [],
@@ -1304,17 +1320,20 @@ function generateId(prefix) {
   return `${prefix}_${crypto.randomBytes(8).toString("hex")}`;
 }
 
-function generateLicenseKey(existingKeys) {
+function generateLicenseKey(existingKeys, prefix = "XK") {
+  const cleanPrefix = cleanKeyPrefix(prefix, "XK");
   let licenseKey;
   do {
     const bytes = crypto.randomBytes(6).toString("hex").toUpperCase();
-    licenseKey = `XK-${bytes.slice(0, 4)}-${bytes.slice(4, 8)}-${bytes.slice(8, 12)}`;
+    licenseKey = `${cleanPrefix}-${bytes.slice(0, 4)}-${bytes.slice(4, 8)}-${bytes.slice(8, 12)}`;
   } while (existingKeys.has(licenseKey));
   return licenseKey;
 }
 
 function createLicense(store, offer, order, note = "") {
-  const key = generateLicenseKey(new Set(store.keys.map((license) => license.key)));
+  const allowedMaps = normalizeAllowedMaps(offer.allowedMaps);
+  const keyPrefix = keyPrefixForAllowedMaps(allowedMaps, "XK");
+  const key = generateLicenseKey(new Set(store.keys.map((license) => license.key)), keyPrefix);
   const license = {
     key,
     planId: offer.id,
@@ -1329,7 +1348,7 @@ function createLicense(store, offer, order, note = "") {
     contact: order.contact,
     orderId: order.id,
     devicesLimit: offer.devicesLimit,
-    allowedMaps: normalizeAllowedMaps(offer.allowedMaps),
+    allowedMaps,
     activations: [],
     createdAt: nowIso(),
     expiresAt: addDays(offer.durationDays),
@@ -1602,7 +1621,8 @@ function hashHwid(value) {
   return crypto.createHash("sha256").update(normalizeHwid(value)).digest("hex");
 }
 
-function generateScriptKey() {
+function generateScriptKey(prefix = SCRIPT_KEY_PREFIX) {
+  const cleanPrefix = cleanKeyPrefix(prefix, SCRIPT_KEY_PREFIX);
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const groups = [4, 4, 5, 4, 5, 4].map((size) => {
     let part = "";
@@ -1611,7 +1631,7 @@ function generateScriptKey() {
     }
     return part;
   });
-  return `${SCRIPT_KEY_PREFIX}-${groups.join("-")}`;
+  return `${cleanPrefix}-${groups.join("-")}`;
 }
 
 function publicScriptLicense(license) {
@@ -1678,6 +1698,7 @@ function createLocalScriptLicenseForAdmin(store, body) {
   const product = findProduct(productId, store);
   const requestedMaps = normalizeAllowedMaps(body.allowedMaps);
   const allowedMaps = requestedMaps.length ? requestedMaps : allowedMapsForProduct(product);
+  const keyPrefix = keyPrefixForAllowedMaps(allowedMaps, SCRIPT_KEY_PREFIX);
 
   if (!discordId) {
     throw new Error("Discord ID is required");
@@ -1686,7 +1707,7 @@ function createLocalScriptLicenseForAdmin(store, body) {
   const keySet = new Set(store.keys.map((license) => license.key));
   let key = "";
   do {
-    key = generateScriptKey();
+    key = generateScriptKey(keyPrefix);
   } while (keySet.has(key));
 
   const license = {
@@ -3094,6 +3115,7 @@ async function handleAdminApi(req, res, pathname) {
     const product = findProduct(productId, store);
     const requestedMaps = normalizeAllowedMaps(body.allowedMaps);
     const allowedMaps = requestedMaps.length ? requestedMaps : allowedMapsForProduct(product);
+    const keyPrefix = keyPrefixForAllowedMaps(allowedMaps, SCRIPT_KEY_PREFIX);
 
     if (!discordId) {
       sendJson(res, 400, { ok: false, error: "Discord ID is required" });
@@ -3105,7 +3127,7 @@ async function handleAdminApi(req, res, pathname) {
       let created = null;
       try {
         for (let attempt = 0; attempt < 8; attempt += 1) {
-          key = generateScriptKey();
+          key = generateScriptKey(keyPrefix);
           try {
             const inserted = await supabaseRequest("script_licenses", {
               method: "POST",

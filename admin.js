@@ -83,7 +83,7 @@ function renderScriptMapHints() {
   const hints = document.querySelectorAll(".script-map-hints");
   if (!hints.length) return;
   const text = latestScriptMaps.length
-    ? `Slug ที่ใช้ได้: ${latestScriptMaps.map((map) => `${map.slug} (${map.name})`).join(", ")}`
+    ? `Map slugs / key prefix: ${latestScriptMaps.map((map) => `${map.slug} -> ${map.keyPrefix || "SHORA"} (${map.name})`).join(", ")}`
     : "เว้นว่างไว้หากต้องการให้ใช้ได้ทุกแมพ";
   hints.forEach((hint) => {
     hint.textContent = text;
