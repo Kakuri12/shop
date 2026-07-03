@@ -951,9 +951,8 @@ function setupDeviceResetTool() {
       setToolResult(
         "#resetDeviceResult",
         "success",
-        "Reset Device สำเร็จ",
+        "รีแล้ว",
         data.message || "ล้าง HWID แล้ว รันสคริปต์อีกครั้งเพื่อผูกเครื่องใหม่",
-        scriptSnippetBox(data.script?.loader || "", "สคริปต์หลัง Reset Device"),
       );
     } catch (error) {
       const needsLogin = /เข้าสู่ระบบ/.test(error.message);
